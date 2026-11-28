@@ -47,7 +47,13 @@ const ACTION_LABEL: Record<AuditAction, string> = {
   cashOut: 'Изъятие',
   payout: 'Выдача гостю',
   topUpCancel: 'Отмена пополнения',
+  clientBirthDate: 'Дата рождения',
 };
+
+/** `YYYY-MM-DD` → `ДД.ММ.ГГГГ`; anything else — «—». */
+function dmy(v: unknown): string {
+  return typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v) ? v.split('-').reverse().join('.') : '—';
+}
 
 /**
  * A signal is something for the owner to look into, so it is amber (F keeps red for a refusal, a blocked PC and ending
@@ -364,6 +370,42 @@ export default function ControlPage(): JSX.Element {
                     num: true,
                     width: '9rem',
                     render: (e) => <Sum minor={e.amount} />,
+                  },
+                ]}
+              />
+            </Section>
+          )}
+
+          {/* D-107: the curfew rests on the date of birth, so every change of it is here. */}
+          {data.birthDates && data.birthDates.length > 0 && (
+            <Section title={t('Изменения даты рождения')} bodyClassName="p-2">
+              <Table<AuditEntry>
+                rows={data.birthDates}
+                rowKey={(e) => e.id}
+                empty={t('Записей нет')}
+                columns={[
+                  {
+                    key: 'at',
+                    title: t('Время'),
+                    width: '9rem',
+                    render: (e) => <span className="tnum font-mono text-xs text-dim">{dateTime(e.at)}</span>,
+                  },
+                  {
+                    key: 'who',
+                    title: t('Кто'),
+                    width: '11rem',
+                    render: (e) => (e.meta['byPlayer'] === true ? t('Игрок на ПК') : e.staffName),
+                  },
+                  { key: 'client', title: t('Клиент'), render: (e) => String(e.meta['clientName'] ?? '') },
+                  {
+                    key: 'change',
+                    title: t('Было → стало'),
+                    width: '14rem',
+                    render: (e) => (
+                      <span className="tnum font-mono text-xs">
+                        {dmy(e.meta['before'])} → {dmy(e.meta['after'])}
+                      </span>
+                    ),
                   },
                 ]}
               />

@@ -327,6 +327,17 @@ public sealed class SessionHandlers : IIpcHandlerGroup
             throw IpcError.Validation("gender", string.IsNullOrEmpty(request.Gender) ? "required" : "enum").ToException();
         }
 
+        // D-107: and the date of birth (the server checks the age on the club's date).
+        if (string.IsNullOrWhiteSpace(request.BirthDate))
+        {
+            throw IpcError.Validation("birthDate", "required").ToException();
+        }
+
+        if (!UserDomainHandlers.IsBirthDate(request.BirthDate))
+        {
+            throw IpcError.Validation("birthDate", "format").ToException();
+        }
+
         RequireReady();
         if (_users.User is not null)
         {
@@ -342,7 +353,8 @@ public sealed class SessionHandlers : IIpcHandlerGroup
         RequireOnline();
         string hwid = await _hwid.GetAsync(cancellationToken).ConfigureAwait(false);
         AuthResponse auth = await _server.RegisterPlayerAsync(
-            new RegisterAuthRequest(pcId, hwid, displayName, username, password, request.AcceptRules, _shellSettings.Get().Locale, request.Gender), cancellationToken).ConfigureAwait(false);
+            new RegisterAuthRequest(pcId, hwid, displayName, username, password, request.AcceptRules, _shellSettings.Get().Locale, request.Gender, request.BirthDate.Trim()),
+            cancellationToken).ConfigureAwait(false);
         _logger.LogInformation("User {UserId} ({Username}) registered on this PC", auth.User.Id, auth.User.Username);
         return await SignedInOnlineAsync(auth, auth.User.Username, "register", guest: false, cancellationToken).ConfigureAwait(false);
     }
@@ -1469,6 +1481,10 @@ public sealed class UserDomainHandlers : IIpcHandlerGroup
         }
     }
 
+    /// <summary>A calendar date <c>YYYY-MM-DD</c> (D-107); the age range is the server's to check, on the club's date.</summary>
+    internal static bool IsBirthDate(string value) =>
+        DateOnly.TryParseExact(value.Trim(), "yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out _);
+
     private async Task<User> ProfileUpdateAsync(IpcContext context, ProfileUpdateRequest request, CancellationToken cancellationToken)
     {
         User user = context.RequireUser();
@@ -1492,7 +1508,13 @@ public sealed class UserDomainHandlers : IIpcHandlerGroup
             throw IpcError.Validation("pin", "format", "PIN must be 4–6 digits").ToException();
         }
 
-        if (request.DisplayName is null && request.AvatarUrl is null && request.Locale is null && request.Pin is null)
+        // D-107: the player gives the date of birth once; the server refuses a second one (403 birthDateLocked).
+        if (request.BirthDate is { } birthDate && !IsBirthDate(birthDate))
+        {
+            throw IpcError.Validation("birthDate", "format").ToException();
+        }
+
+        if (request.DisplayName is null && request.AvatarUrl is null && request.Locale is null && request.Pin is null && request.BirthDate is null)
         {
             throw IpcError.Validation("payload", "empty").ToException();
         }

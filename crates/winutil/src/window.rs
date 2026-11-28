@@ -49,7 +49,7 @@ mod imp {
         IsWindowVisible, SetForegroundWindow, SetWindowDisplayAffinity, SetWindowPos, ShowWindow,
         ASFW_ANY, GWL_EXSTYLE, GWL_STYLE, HWND_NOTOPMOST, HWND_TOPMOST, SWP_FRAMECHANGED,
         SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOOWNERZORDER, SWP_NOSIZE, SWP_NOZORDER, SWP_SHOWWINDOW,
-        SW_FORCEMINIMIZE, SW_HIDE, SW_SHOW, WDA_EXCLUDEFROMCAPTURE, WDA_NONE,
+        SW_FORCEMINIMIZE, SW_HIDE, SW_SHOW, SW_SHOWNOACTIVATE, WDA_EXCLUDEFROMCAPTURE, WDA_NONE,
         WINDOW_LONG_PTR_INDEX, WS_CAPTION, WS_EX_CLIENTEDGE, WS_EX_DLGMODALFRAME, WS_EX_STATICEDGE,
         WS_EX_TOOLWINDOW, WS_EX_WINDOWEDGE, WS_MAXIMIZEBOX, WS_MINIMIZEBOX, WS_POPUP, WS_SYSMENU,
         WS_THICKFRAME,
@@ -201,6 +201,34 @@ mod imp {
             )
         }
         .ret("SetWindowPos")
+    }
+
+    /// Shows the window on top of the `HWND_TOPMOST` band **without activating it**: the foreground
+    /// window (a game) keeps the keyboard focus and is not minimized (`SW_SHOWNOACTIVATE`, then
+    /// `SWP_NOACTIVATE | SWP_SHOWWINDOW`). For toasts over a game (D-109).
+    pub fn show_no_activate(hwnd: isize) -> Result<()> {
+        let h = hwnd_from_raw(hwnd);
+        // SAFETY: no preconditions beyond a window handle. The return value is the previous visibility.
+        let _ = unsafe { ShowWindow(h, SW_SHOWNOACTIVATE) };
+        // SAFETY: as above.
+        unsafe {
+            SetWindowPos(
+                h,
+                HWND_TOPMOST,
+                0,
+                0,
+                0,
+                0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW,
+            )
+        }
+        .ret("SetWindowPos")
+    }
+
+    /// Hides the window (`SW_HIDE`), whoever showed it.
+    pub fn hide_window(hwnd: isize) {
+        // SAFETY: no preconditions beyond a window handle. The return value is the previous visibility.
+        let _ = unsafe { ShowWindow(hwnd_from_raw(hwnd), SW_HIDE) };
     }
 
     /// Strips the caption/frame styles and sizes the window to `monitor` (a [`crate::monitor::MonitorInfo::rect`]).
@@ -530,6 +558,12 @@ mod imp {
         Err(WinUtilError::Unsupported)
     }
 
+    pub fn show_no_activate(_hwnd: isize) -> Result<()> {
+        Err(WinUtilError::Unsupported)
+    }
+
+    pub fn hide_window(_hwnd: isize) {}
+
     pub fn foreground_window() -> isize {
         0
     }
@@ -600,9 +634,9 @@ mod imp {
 
 pub use imp::{
     allow_set_foreground, child_windows, enumerate_windows, find_window, force_foreground,
-    foreground_window, hide_taskbar, is_foreground, minimize_others, place_window,
-    set_fullscreen_borderless, set_topmost, set_window_display_affinity, show_taskbar,
-    taskbar_autohide, window_pid, window_rect, TopmostGuard,
+    foreground_window, hide_taskbar, hide_window, is_foreground, minimize_others, place_window,
+    set_fullscreen_borderless, set_topmost, set_window_display_affinity, show_no_activate,
+    show_taskbar, taskbar_autohide, window_pid, window_rect, TopmostGuard,
 };
 
 #[cfg(test)]

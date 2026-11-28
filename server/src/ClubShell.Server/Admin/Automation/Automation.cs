@@ -24,9 +24,13 @@ namespace ClubShell.Server.Admin;
 /// </summary>
 public sealed class AutomationService(NpgsqlDataSource db, CommandDispatcher commands, Pushes pushes, TimeProvider clock, ILogger<AutomationService> logger)
 {
-    /// <summary>After a session opened (§5.3): <c>sessionStarted</c>, and <c>visitCount</c> when this is the n-th visit of the client here.</summary>
+    /// <summary>
+    /// After a session opened (§5.3): <c>sessionStarted</c>, and <c>visitCount</c> when this is the n-th visit of the client
+    /// here; the birthday gift (D-107) when it is due.
+    /// </summary>
     public async Task SessionOpenedAsync(Guid clubId, Guid sessionId, Guid pcId, Guid userId)
     {
+        await BirthdayAsync(clubId, userId, pcId);
         List<Rule> rules;
         long earlier;
         await using (var c = await db.OpenConnectionAsync())
@@ -131,6 +135,123 @@ public sealed class AutomationService(NpgsqlDataSource db, CommandDispatcher com
         }
 
         return fired;
+    }
+
+    /// <summary>
+    /// The club minute's birthday pass (D-107): every player of an open session in the club whose birthday is due gets the
+    /// gift — a session already running at midnight, or opened before the owner turned the gift on.
+    /// </summary>
+    public async Task<int> BirthdaysAsync(Guid clubId)
+    {
+        List<(Guid UserId, Guid PcId)> open;
+        await using (var c = await db.OpenConnectionAsync())
+        {
+            var gift = await BirthdayGift.OfClubAsync(c, null, clubId);
+            if (!gift.Enabled)
+            {
+                return 0;
+            }
+
+            open = (await c.QueryAsync<(Guid, Guid)>(
+                """
+                SELECT s.user_id, s.pc_id FROM sessions s JOIN users u ON u.id = s.user_id
+                WHERE s.club_id = @clubId AND s.state <> 'ended' AND u.birth_date IS NOT NULL AND NOT u.transient AND u.role IN ('member', 'vip')
+                ORDER BY s.started_at, s.id
+                """,
+                new { clubId })).ToList();
+        }
+
+        var fired = 0;
+        foreach (var (userId, pcId) in open)
+        {
+            fired += await BirthdayAsync(clubId, userId, pcId) ? 1 : 0;
+        }
+
+        return fired;
+    }
+
+    /// <summary>
+    /// The birthday gift of <paramref name="userId"/> playing on <paramref name="pcId"/>, when the club's gift is on and the
+    /// birthday (club-local) is within its window: in one transaction under the player's lock, <c>rule_firings</c>
+    /// (<see cref="BirthdayGift.RuleId"/>, target <c>birthday:{userId}:{year}</c>) — unless any club of the network already
+    /// gave the gift of that birthday year, so it is never given twice in a year, across restarts and clubs (the wallet is
+    /// the network's) — then the <c>bonus</c> ledger row on the bonus account (D-106) and the message to the PC. A member or
+    /// VIP only: never a guest (D-36) nor a staff account. False when nothing was given.
+    /// </summary>
+    public async Task<bool> BirthdayAsync(Guid clubId, Guid userId, Guid pcId)
+    {
+        var now = clock.GetUtcNow();
+        ServerCommandEnvelope? queued = null;
+        var credited = false;
+        try
+        {
+            await using var c = await db.OpenConnectionAsync();
+            var gift = await BirthdayGift.OfClubAsync(c, null, clubId);
+            if (!gift.Enabled)
+            {
+                return false;
+            }
+
+            await using var tx = await c.BeginTransactionAsync();
+            await c.ExecuteAsync("SET LOCAL lock_timeout = '10s'", transaction: tx);
+            await AdvisoryLocks.UserAsync(c, tx, userId);
+            var who = await c.QuerySingleOrDefaultAsync<(string? BirthDate, string Role, bool Transient, string DisplayName, Guid NetworkId, string TimeZone, string ClubName)?>(
+                """
+                SELECT to_char(u.birth_date, 'YYYY-MM-DD'), u.role, u.transient, u.display_name, cl.network_id, cl.time_zone,
+                       coalesce(nullif(cl.settings -> 'branding' ->> 'clubName', ''), cl.name)
+                FROM users u JOIN clubs cl ON cl.id = @clubId AND cl.network_id = u.network_id
+                WHERE u.id = @userId AND u.deleted_at IS NULL
+                """,
+                new { clubId, userId }, tx);
+            if (who is not { } w || w.Transient || w.Role is not ("member" or "vip") || Users.BirthDates.Parse(w.BirthDate) is not { } birth
+                || Users.BirthDates.BirthdayYear(birth, Users.BirthDates.Today(now, w.TimeZone), gift.WindowDays) is not { } year)
+            {
+                return false;
+            }
+
+            var target = $"birthday:{userId}:{year}";
+            if (await c.ExecuteScalarAsync<bool>(
+                    "SELECT EXISTS (SELECT 1 FROM rule_firings f JOIN clubs cl ON cl.id = f.club_id WHERE cl.network_id = @NetworkId AND f.target_key = @target)",
+                    new { w.NetworkId, target }, tx))
+            {
+                return false;
+            }
+
+            await c.ExecuteAsync(
+                "INSERT INTO rule_firings (club_id, rule_id, target_key, fired_at) VALUES (@clubId, @rule, @target, @now)",
+                new { clubId, rule = BirthdayGift.RuleId, target, now }, tx);
+            if (gift.Amount > 0)
+            {
+                await Ledger.PostAsync(c, tx, userId, allowOverdraft: false, now, new LedgerLine(
+                    "bonus", gift.Amount, "Подарок на день рождения", clubId, PcId: pcId, Meta: new { kind = BirthdayGift.RuleId, year }));
+                credited = true;
+            }
+
+            queued = await commands.QueueAsync(tx, clubId, pcId, NewCommand.Message(new MessageCommand(
+                Guid.NewGuid(), w.ClubName, gift.MessageFor(gift.Amount), NotificationLevel.Info, RequiresAck: false)));
+            await Webhooks.EnqueueAsync(c, tx, clubId, "ruleFired", now, $"День рождения — {w.DisplayName}", new { ruleId = BirthdayGift.RuleId, pcId, userId });
+            await tx.CommitAsync();
+        }
+        catch (Exception ex) when (ex is NpgsqlException or ApiException)
+        {
+            logger.LogWarning(ex, "The birthday gift of club {ClubId} failed for {UserId}", clubId, userId);
+            return false;
+        }
+
+        try
+        {
+            await commands.SendAsync(pcId, queued!);
+            if (credited)
+            {
+                await pushes.WalletAsync(userId);
+            }
+        }
+        catch (NpgsqlException ex)
+        {
+            logger.LogWarning(ex, "Effects of the birthday gift failed after the commit");
+        }
+
+        return true;
     }
 
     private static async Task<IEnumerable<Rule>> RulesAsync(NpgsqlConnection c, Guid clubId, params string[] kinds) =>

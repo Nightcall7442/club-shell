@@ -17,6 +17,7 @@ import {
 const WEEKDAYS = Object.values(Weekday) as Weekday[];
 import {
   applyTransaction,
+  warningMinutesOf,
   arr,
   balanceOf,
   body,
@@ -87,6 +88,8 @@ import {
   totalsSince,
   visitsOf,
   type AutomationRule,
+  type ClubConfig,
+  type PromoCode,
   type CashMove,
   type DeviceKind,
   type ShiftRecord,
@@ -95,6 +98,7 @@ import {
 } from '../club.js';
 import { broadcast, pushToUser } from '../ws.js';
 import { flagsFor, inContract, record, summaries } from '../control.js';
+import { ageOn, birthDateOf, birthdayGift, birthdayStats, parseBirthdayGift } from '../minors.js';
 import { operationsPage } from '../operations.js';
 import { addClub, network, networkReport } from '../network.js';
 import { MAX_CELL, cellTaken, checkRotation, ensureFree, freeCell, hallPlan, readPlan } from '../hall.js';
@@ -150,6 +154,10 @@ function clientView(u: UserRecord): Record<string, unknown> {
     birthYear: p.birthYear,
     cardId: u.cardId,
     gender: u.gender ?? null,
+    // D-107/D-108: the date of birth, the age on today's date and the minor mark.
+    birthDate: u.birthDate ?? null,
+    age: u.birthDate ? ageOn(u.birthDate) : null,
+    minor: u.birthDate ? (ageOn(u.birthDate) ?? 99) < club().limits.minorAge : null,
     spent: spentOf(u.id),
     visits: visitsOf(u.id),
     level: level.level,
@@ -188,6 +196,8 @@ function lookupView(u: UserRecord): Record<string, unknown> {
     cardId: u.cardId,
     playing: pc ? { pcId: pc.id, pcName: pc.name } : null,
     blacklisted: profileOf(u.id).blacklisted,
+    birthDate: u.birthDate ?? null,
+    minor: u.birthDate ? (ageOn(u.birthDate) ?? 99) < club().limits.minorAge : null,
   };
 }
 
@@ -545,7 +555,14 @@ export function clubRoutes(app: FastifyInstance): void {
       happyHours: c.happyHours,
       loyalty: c.loyalty,
       // As the server: guest postpaid at the desk is on unless the owner turned it off.
-      limits: { ...c.limits, guestPostpaid: c.limits.guestPostpaid ?? true, selfSignup: c.limits.selfSignup ?? false },
+      limits: {
+        ...c.limits,
+        guestPostpaid: c.limits.guestPostpaid ?? true,
+        selfSignup: c.limits.selfSignup ?? false,
+        // D-108: the curfew is on, 22:00–06:00, unless the owner changed it.
+        minorCurfewEnabled: c.limits.minorCurfewEnabled ?? true,
+        minorCurfewEnd: c.limits.minorCurfewEnd ?? '06:00',
+      },
       catalog: c.catalog,
       banners: c.banners,
       rulesText: c.rulesText,
@@ -553,6 +570,8 @@ export function clubRoutes(app: FastifyInstance): void {
       topUpPromo: c.topUpPromo ?? DEFAULT_TOPUP_PROMO,
       screensaver: c.screensaver ?? DEFAULT_SCREENSAVER,
       automation: c.automation,
+      // D-107: the birthday gift, the off example until the owner turns it on.
+      birthdayGift: { ...birthdayGift(), ...birthdayStats() },
       notifications: { bigTopupAt: c.notifications.bigTopupAt },
       webhooks: c.webhooks,
       control: c.control,
@@ -572,7 +591,6 @@ export function clubRoutes(app: FastifyInstance): void {
       'pricing',
       'groups',
       'bonusTiers',
-      'promoCodes',
       'happyHours',
       'loyalty',
       'limits',
@@ -592,22 +610,39 @@ export function clubRoutes(app: FastifyInstance): void {
         if (typeof v !== 'number' || !Number.isSafeInteger(v)) throw errors.validation(`limits.${name}`, 'format');
         if (v < 0) throw errors.validation(`limits.${name}`, 'min');
       }
-      for (const name of ['guestPostpaid', 'cashOutOwnerOnly', 'selfSignup']) {
+      for (const name of ['guestPostpaid', 'cashOutOwnerOnly', 'selfSignup', 'minorCurfewEnabled']) {
         const v = limits[name];
         if (v !== undefined && v !== null && typeof v !== 'boolean')
           throw errors.validation(`limits.${name}`, 'format');
       }
+      // D-109: the low-time marks, whole minutes 1..120, at most 8.
+      const marks = limits['warningMinutes'];
+      if (marks !== undefined && marks !== null) {
+        if (!Array.isArray(marks) || marks.some((m) => typeof m !== 'number' || !Number.isInteger(m)))
+          throw errors.validation('limits.warningMinutes', 'format');
+        if ((marks as number[]).some((m) => m < 1)) throw errors.validation('limits.warningMinutes', 'min');
+        if (marks.length > 8 || (marks as number[]).some((m) => m > 120))
+          throw errors.validation('limits.warningMinutes', 'max');
+      }
+      const end = limits['minorCurfewEnd'];
+      if (end !== undefined && end !== null && (typeof end !== 'string' || !/^\d{2}:\d{2}$/.test(end)))
+        throw errors.validation('limits.minorCurfewEnd', 'format');
     }
+    if ('birthdayGift' in b) c.birthdayGift = parseBirthdayGift(b['birthdayGift']);
     // The player-screen designer (D-105), refused field by field as by the server.
     if ('branding' in b) validateLook(b['branding']);
     if ('topUpPromo' in b) c.topUpPromo = parseTopUpPromo(b['topUpPromo']);
+    if ('promoCodes' in b) syncPromoCodes(c, b['promoCodes']);
     if ('screensaver' in b) c.screensaver = parseScreensaver(b['screensaver']);
     const selfSignupBefore = c.limits.selfSignup === true;
+    const marksBefore = warningMinutesOf(c.limits.warningMinutes).join(',');
     for (const k of keys) {
       if (k in b) (c as unknown as Record<string, unknown>)[k] = b[k];
     }
     // The self-signup switch (D-92) reaches the PCs with their config, as on the server.
     if ((c.limits.selfSignup === true) !== selfSignupBefore) bumpCatalog();
+    // ... and so do the low-time marks (session.warningMinutes, D-109).
+    else if (warningMinutesOf(c.limits.warningMinutes).join(',') !== marksBefore) bumpCatalog();
     if ('control' in b) {
       // Thresholds must stay usable numbers whatever the client sent.
       const n = (v: unknown, fallback: number, min: number, max: number): number =>
@@ -787,6 +822,8 @@ export function clubRoutes(app: FastifyInstance): void {
       username = generateLogin(displayName, optStr(b, 'phone', 32), loginTaken);
     }
     const gender = genderOf(b);
+    // D-107: and the date of birth.
+    const birthDate = birthDateOf(b);
     // No password sent: nobody knows one until the desk sets one (the console always sends one, D-103).
     const password = b['password'] === undefined || b['password'] === null ? uuid() : passwordOf(b);
     const cardId = cardOf(b, null);
@@ -808,6 +845,7 @@ export function clubRoutes(app: FastifyInstance): void {
       transient: false,
       muted: false,
       gender,
+      birthDate,
     };
     db.users.push(user);
     club().clients[user.id] = {
@@ -815,7 +853,7 @@ export function clubRoutes(app: FastifyInstance): void {
       note: '',
       blacklisted: false,
       phone: optStr(b, 'phone', 32) ?? '',
-      birthYear: optInt(b, 'birthYear', 1900, 2100),
+      birthYear: Number(birthDate.slice(0, 4)),
     };
     markDirty();
     return { client: clientView(user) };
@@ -839,6 +877,19 @@ export function clubRoutes(app: FastifyInstance): void {
     }
     if (typeof b['displayName'] === 'string') user.displayName = str(b, 'displayName', 64);
     if ('gender' in b) user.gender = genderOf(b);
+    // D-107: never cleared; every change is journaled (the curfew rests on it).
+    if ('birthDate' in b) {
+      const birthDate = birthDateOf(b);
+      if (birthDate !== user.birthDate) {
+        record(me, 'clientBirthDate', {
+          userId: user.id,
+          detail: `${user.displayName} · ${user.birthDate ?? '—'} → ${birthDate}`,
+          meta: { before: user.birthDate ?? null, after: birthDate, clientName: user.displayName },
+        });
+        user.birthDate = birthDate;
+        p.birthYear = Number(birthDate.slice(0, 4));
+      }
+    }
     club().clients[user.id] = p;
     markDirty();
     if (p.groupId !== groupBefore) {
@@ -924,9 +975,14 @@ export function clubRoutes(app: FastifyInstance): void {
       if (!user) throw errors.notFound('user');
       const code = club().promoCodes.find((p) => p.code.toUpperCase() === str(b, 'code', 32).toUpperCase());
       if (!code) throw errors.notFound('promo');
-      if (code.expiresAt && code.expiresAt < now()) throw errors.validation('code', 'expired');
+      if (code.expiresAt && Date.parse(code.expiresAt) <= Date.now()) throw errors.validation('code', 'expired');
       if (code.usesLeft !== null && code.usesLeft <= 0) throw errors.validation('code', 'exhausted');
       if (code.kind !== 'bonus') throw errors.validation('code', 'discountAtCheckout');
+      // One redeem per client, as the server's `promo_redemptions` key (code, client).
+      const redemptions = (club().promoRedemptions ??= {});
+      const who = (redemptions[code.code.toUpperCase()] ??= []);
+      if (who.includes(user.id)) throw errors.validation('code', 'exhausted');
+      who.push(user.id);
       applyTransaction(user, 'bonus', uzs(code.value), `Промокод ${code.code}`, null);
       code.used += 1;
       if (code.usesLeft !== null) code.usesLeft -= 1;
@@ -1348,6 +1404,7 @@ export function clubRoutes(app: FastifyInstance): void {
     const inPeriod = c.audit.filter((e) => e.at >= from && inContract(e));
     // D-91: the desk top-ups taken back, apart from the journal (outside the contract's actions).
     const corrections = c.audit.filter((e) => e.at >= from && e.action === 'topUpCancel');
+    const birthDates = c.audit.filter((e) => e.at >= from && e.action === 'clientBirthDate');
     const flags = flagsFor(inPeriod);
     const staffId = req.query.staffId;
     return {
@@ -1358,6 +1415,7 @@ export function clubRoutes(app: FastifyInstance): void {
       flags: staffId ? flags.filter((f) => f.staffId === staffId) : flags,
       log: (staffId ? inPeriod.filter((e) => e.staffId === staffId) : inPeriod).slice(0, 300),
       corrections: (staffId ? corrections.filter((e) => e.staffId === staffId) : corrections).slice(0, 300),
+      birthDates: (staffId ? birthDates.filter((e) => e.staffId === staffId) : birthDates).slice(0, 300),
     };
   });
 
@@ -1509,6 +1567,45 @@ export function topUpWithBonus(
 }
 
 export type { ShellFeatures };
+
+/**
+ * `promoCodes` of `PATCH /admin/club` as the server syncs them (ClubSettingsEndpoints.SyncPromoCodesAsync): a code is 1–32
+ * characters and unique ignoring case (`400 promoCodes[i].code required / max / taken`); a kept code (same code ignoring
+ * case) takes the sent kind, value and expiry but keeps its server counters `used` and `usesLeft`; a new one starts from
+ * the sent ones; a dropped one is gone, with its redemptions.
+ */
+function syncPromoCodes(c: ClubConfig, raw: unknown): void {
+  if (!Array.isArray(raw)) throw errors.validation('promoCodes', 'format');
+  const seen = new Set<string>();
+  const sent = raw.map((p: unknown, i): PromoCode => {
+    const at = `promoCodes[${i}]`;
+    if (!isObject(p)) throw errors.validation(at, 'format');
+    const code = typeof p['code'] === 'string' ? p['code'] : '';
+    if (code.length === 0 || code.length > 32)
+      throw errors.validation(`${at}.code`, code.length === 0 ? 'required' : 'max');
+    if (seen.has(code.toUpperCase())) throw errors.validation(`${at}.code`, 'taken');
+    seen.add(code.toUpperCase());
+    const kind = p['kind'];
+    if (kind !== 'bonus' && kind !== 'discountPct') throw errors.validation(`${at}.kind`, 'format');
+    const whole = (v: unknown): v is number => typeof v === 'number' && Number.isSafeInteger(v) && v >= 0;
+    if (!whole(p['value'])) throw errors.validation(`${at}.value`, 'format');
+    const usesLeft = p['usesLeft'] ?? null;
+    if (usesLeft !== null && !whole(usesLeft)) throw errors.validation(`${at}.usesLeft`, 'format');
+    const expiresAt = p['expiresAt'] ?? null;
+    if (expiresAt !== null && (typeof expiresAt !== 'string' || Number.isNaN(Date.parse(expiresAt))))
+      throw errors.validation(`${at}.expiresAt`, 'format');
+    const used = whole(p['used']) ? p['used'] : 0;
+    return { code, kind, value: p['value'], usesLeft, expiresAt, used };
+  });
+  const live = new Map(c.promoCodes.map((p) => [p.code.toUpperCase(), p]));
+  c.promoCodes = sent.map((p) => {
+    const kept = live.get(p.code.toUpperCase());
+    return kept ? { ...p, usesLeft: kept.usesLeft, used: kept.used } : p;
+  });
+  const redemptions = c.promoRedemptions ?? {};
+  for (const code of Object.keys(redemptions)) if (!seen.has(code)) delete redemptions[code];
+  c.promoRedemptions = redemptions;
+}
 
 /** The owner's «x2» promotion, checked as the server checks it (`400 validation` on `topUpPromo.*`). */
 function parseTopUpPromo(raw: unknown): TopUpPromo {

@@ -255,6 +255,9 @@ export const UZ: Record<string, string> = {
   'Баланс пополнен · теперь {sum}': 'Balans toʻldirildi · endi {sum}',
   'Пополнить на {sum}': '{sum} ga toʻldirish',
   'Долги гостей': 'Mehmonlar qarzi',
+  'Предупреждать за': 'Ogohlantirish',
+  'Минуты через запятую, по умолчанию 10, 7, 5. В последнюю минуту — всегда. И для купленного времени, и когда деньгам на балансе осталось на столько минут. Видно и поверх игры.':
+    'Daqiqalar vergul bilan, odatda 10, 7, 5. Oxirgi daqiqada — har doim. Sotib olingan vaqt uchun ham, balansdagi pul shuncha daqiqaga qolganda ham. O‘yin ustida ham ko‘rinadi.',
   'Автопродление сеанса': 'Seansni avtomatik uzaytirish',
   'Когда оплаченное время кончается, а на балансе клиента хватает денег, сеанс продлевается сам.':
     'Toʻlangan vaqt tugaganda mijoz balansida pul yetarli boʻlsa, seans oʻzi uzayadi.',
@@ -1707,6 +1710,56 @@ export const UZ: Record<string, string> = {
   Женский: 'Ayol',
   'Пол не указан': 'Jinsi koʻrsatilmagan',
   'Укажите пол клиента': 'Mijozning jinsini koʻrsating',
+  // D-107/D-108: the date of birth, the birthday gift and the minors' night curfew.
+  'Укажите дату рождения клиента': 'Mijozning tugʻilgan sanasini koʻrsating',
+  'Дата рождения — в виде ДД.ММ.ГГГГ': 'Tugʻilgan sana — KK.OO.YYYY koʻrinishida',
+  'Дата рождения не может быть в будущем': 'Tugʻilgan sana kelajakda boʻla olmaydi',
+  'Клиенту должно быть не меньше 5 лет': 'Mijoz kamida 5 yoshda boʻlishi kerak',
+  'Проверьте год рождения: больше 100 лет': 'Tugʻilgan yilni tekshiring: 100 yoshdan katta',
+  'Несовершеннолетний: ночью играть нельзя': 'Voyaga yetmagan: kechasi oʻynash mumkin emas',
+  'до {n}': '{n} yoshgacha',
+  'Дата рождения': 'Tugʻilgan sana',
+  'возраст {n}': 'yoshi {n}',
+  'Дата рождения не указана': 'Tugʻilgan sana koʻrsatilmagan',
+  'Дату рождения меняет только касса': 'Tugʻilgan sanani faqat kassa oʻzgartiradi',
+  'Время — в виде ЧЧ:ММ': 'Vaqt — SS:DD koʻrinishida',
+  'Сумма подарка не может быть отрицательной': 'Sovgʻa summasi manfiy boʻla olmaydi',
+  'Окно — не больше 30 дней': 'Oraliq — 30 kundan oshmasin',
+  'Дата рождения не указана: до {from} можно не больше {n} мин':
+    'Tugʻilgan sana koʻrsatilmagan: {from} gacha koʻpi bilan {n} daq mumkin',
+  'Несовершеннолетним нельзя играть с {from} до {to}: можно не больше {n} мин':
+    'Voyaga yetmaganlar {from} dan {to} gacha oʻynay olmaydi: koʻpi bilan {n} daq mumkin',
+  'Несовершеннолетним нельзя играть с {from} до {to}': 'Voyaga yetmaganlar {from} dan {to} gacha oʻynay olmaydi',
+  'С днём рождения! +{sum} бонусов': 'Tugʻilgan kuningiz bilan! +{sum} bonus',
+  'День рождения': 'Tugʻilgan kun',
+  'у клиента день рождения (± {n} дн.) и он играет в клубе':
+    'mijozning tugʻilgan kuni (± {n} kun) va u klubda oʻynayapti',
+  'у клиента день рождения и он играет в клубе': 'mijozning tugʻilgan kuni va u klubda oʻynayapti',
+  'бонус {sum} на бонусный счёт и поздравление на экран, раз в год':
+    'bonus hisobiga {sum} bonus va ekranga tabrik, yiliga bir marta',
+  'За год: {n}': 'Bir yilda: {n}',
+  'Сумма подарка': 'Sovgʻa summasi',
+  'Окно, дней до и после': 'Oraliq, oldin va keyin kunlar',
+  'дн.': 'kun',
+  'Поздравление на экране': 'Ekrandagi tabrik',
+  '{bonus} — сумма. Пусто — «{sample}»': '{bonus} — summa. Boʻsh — «{sample}»',
+  'Игрок увидит: «{text}». Дата рождения — из карточки клиента; бонусы тратятся только на игровое время.':
+    'Oʻyinchi koʻradi: «{text}». Tugʻilgan sana — mijoz kartasidan; bonuslar faqat oʻyin vaqtiga sarflanadi.',
+  'Нет даты рождения': 'Tugʻilgan sana yoʻq',
+  'Ночной запрет для несовершеннолетних': 'Voyaga yetmaganlar uchun tungi taqiq',
+  'В эти часы несовершеннолетний не начнёт и не продлит сеанс ни на ПК, ни на кассе. Идущий сеанс получит предупреждения за 10 и 5 минут и завершится в начале запрета; неоплаченное время вернётся на баланс. Клиент без даты рождения считается несовершеннолетним. Гостей без аккаунта запрет не касается — за них отвечает касса.':
+    'Bu soatlarda voyaga yetmagan seansni na kompyuterda, na kassada boshlay olmaydi va uzaytira olmaydi. Davom etayotgan seans 10 va 5 daqiqa oldin ogohlantiriladi va taqiq boshlanganda yakunlanadi; ishlatilmagan vaqt balansga qaytadi. Tugʻilgan sanasi yoʻq mijoz voyaga yetmagan hisoblanadi. Akkauntsiz mehmonlarga taqiq tegishli emas — ular uchun kassa javob beradi.',
+  'Запрет с': 'Taqiq boshlanishi',
+  'Запрет до': 'Taqiq tugashi',
+  'Изменения даты рождения': 'Tugʻilgan sana oʻzgarishlari',
+  'Игрок на ПК': 'Kompyuterdagi oʻyinchi',
+  'Было → стало': 'Edi → boʻldi',
+  'Ночной запрет для несовершеннолетних: сеанс {name} завершён в {time}, неиспользованное время возвращено':
+    'Voyaga yetmaganlar uchun tungi taqiq: {name} seansi {time} da yakunlandi, ishlatilmagan vaqt qaytarildi',
+  'Ночной запрет для несовершеннолетних: сеанс завершится в {time}':
+    'Voyaga yetmaganlar uchun tungi taqiq: seans {time} da yakunlanadi',
+  'Без даты рождения ночью играть нельзя: укажите её в карточке клиента':
+    'Tugʻilgan sanasiz kechasi oʻynash mumkin emas: uni mijoz kartasida koʻrsating',
   // D-106: the bonus account, play time only.
   'бонусы {sum}': 'bonuslar {sum}',
   'Бонус этого пополнения уже потрачен на время: на бонусах осталось {sum}':
@@ -1721,6 +1774,55 @@ export const UZ: Record<string, string> = {
     'Bonus berildi {credited} soʻm, vaqt uchun bonusdan toʻlandi {spent} soʻm — bu pul emas',
   'Бонусами за время': 'Vaqt uchun bonusdan',
   'Бонус {sum} — на бонусный счёт, только на время': 'Bonus {sum} — bonus hisobiga, faqat vaqt uchun',
+  Истёк: 'Muddati oʻtgan',
+  Исчерпан: 'Tugagan',
+  'Не работает': 'Ishlamaydi',
+  '+{sum} сум бонусов': '+{sum} soʻm bonus',
+  'Скидка {pct} %': '{pct} % chegirma',
+  Скопировать: 'Nusxa olish',
+  'Скопировать код {code}': '{code} kodidan nusxa olish',
+  'Новый промокод': 'Yangi promokod',
+  'Клиент называет код на кассе или вводит его на своём ПК — бонус зачисляется на бонусный счёт и тратится только на игровое время. Каждый клиент применяет код один раз. Изменения сохраняются сразу.':
+    'Mijoz kodni kassada aytadi yoki oʻz kompyuterida kiritadi — bonus bonus hisobiga tushadi va faqat oʻyin vaqtiga sarflanadi. Har bir mijoz kodni bir marta qoʻllaydi. Oʻzgarishlar darhol saqlanadi.',
+  'Промокодов пока нет': 'Hozircha promokodlar yoʻq',
+  'Создайте код — например, для новых гостей или турнира.':
+    'Kod yarating — masalan, yangi mehmonlar yoki turnir uchun.',
+  'Создать промокод': 'Promokod yaratish',
+  'Что даёт': 'Nima beradi',
+  'Скидки по коду не поддерживаются': 'Kod boʻyicha chegirmalar qoʻllab-quvvatlanmaydi',
+  'без лимита': 'cheklovsiz',
+  'Действует до': 'Amal qiladi',
+  'без срока': 'muddatsiz',
+  'Изменить {code}': '{code} ni oʻzgartirish',
+  'Удалить {code}': '{code} ni oʻchirish',
+  'Промокод {code} создан': '{code} promokodi yaratildi',
+  'Промокод {code} сохранён': '{code} promokodi saqlandi',
+  'Промокод {code} удалён': '{code} promokodi oʻchirildi',
+  'Такой код уже есть': 'Bunday kod allaqachon bor',
+  'Введите код': 'Kodni kiriting',
+  'Код — не длиннее 32 символов': 'Kod — 32 belgidan oshmasin',
+  'Только латинские буквы, цифры, «-» и «_»': 'Faqat lotin harflari, raqamlar, «-» va «_»',
+  'Не меньше 1 — или оставьте пустым': 'Kamida 1 — yoki boʻsh qoldiring',
+  'Дата уже прошла': 'Bu sana oʻtib ketgan',
+  'Этого промокода уже нет — его удалили с другой кассы': 'Bu promokod endi yoʻq — uni boshqa kassadan oʻchirishgan',
+  'Промокод {code}': '{code} promokodi',
+  'Латинские буквы и цифры, до 32 символов': 'Lotin harflari va raqamlar, 32 belgigacha',
+  'Код не меняется: новый код — это новый промокод. Использовано: {used}.':
+    'Kod oʻzgarmaydi: yangi kod — bu yangi promokod. Ishlatilgan: {used}.',
+  'Скидки по промокоду не поддерживаются: код станет бонусным — укажите сумму бонуса.':
+    'Promokod boʻyicha chegirmalar qoʻllab-quvvatlanmaydi: kod bonusli boʻladi — bonus summasini kiriting.',
+  'Бонус клиенту': 'Mijozga bonus',
+  'Зачисляется на бонусный счёт: тратится только на игровое время, не на бар.':
+    'Bonus hisobiga tushadi: faqat oʻyin vaqtiga sarflanadi, barga emas.',
+  'Сколько раз можно применить': 'Necha marta qoʻllash mumkin',
+  'Пусто — без лимита': 'Boʻsh — cheklovsiz',
+  'Лимит задаётся при создании кода': 'Cheklov kod yaratilganda belgilanadi',
+  'Включительно. Пусто — без срока': 'Shu kun ham kiradi. Boʻsh — muddatsiz',
+  'Удалить промокод {code}?': '{code} promokodi oʻchirilsinmi?',
+  'Клиенты больше не смогут его применить. Бонусы, уже начисленные по нему, останутся у клиентов.':
+    'Mijozlar uni boshqa qoʻllay olmaydi. U boʻyicha berilgan bonuslar mijozlarda qoladi.',
+  'Удаляем…': 'Oʻchirilmoqda…',
+  'Скидочный промокод не применяется — нужен бонусный': 'Chegirmali promokod qoʻllanmaydi — bonusli kerak',
 };
 export const EN: Record<string, string> = {
   Принято: 'Taken',
@@ -1976,6 +2078,9 @@ export const EN: Record<string, string> = {
   'Баланс пополнен · теперь {sum}': 'Balance topped up · now {sum}',
   'Пополнить на {sum}': 'Top up {sum}',
   'Долги гостей': 'Guest debts',
+  'Предупреждать за': 'Warn at',
+  'Минуты через запятую, по умолчанию 10, 7, 5. В последнюю минуту — всегда. И для купленного времени, и когда деньгам на балансе осталось на столько минут. Видно и поверх игры.':
+    'Minutes left, comma-separated; 10, 7, 5 by default. The last minute always. For bought time and when the balance pays for only that many minutes. Shown over a game too.',
   'Автопродление сеанса': 'Auto-extend sessions',
   'Когда оплаченное время кончается, а на балансе клиента хватает денег, сеанс продлевается сам.':
     'When the paid time runs out and the client has enough on balance, the session extends itself.',
@@ -3421,6 +3526,55 @@ export const EN: Record<string, string> = {
   Женский: 'Female',
   'Пол не указан': 'Gender not given',
   'Укажите пол клиента': 'Choose the client’s gender',
+  // D-107/D-108: the date of birth, the birthday gift and the minors' night curfew.
+  'Укажите дату рождения клиента': 'Enter the client’s date of birth',
+  'Дата рождения — в виде ДД.ММ.ГГГГ': 'Date of birth as DD.MM.YYYY',
+  'Дата рождения не может быть в будущем': 'The date of birth cannot be in the future',
+  'Клиенту должно быть не меньше 5 лет': 'The client must be at least 5 years old',
+  'Проверьте год рождения: больше 100 лет': 'Check the year of birth: over 100 years',
+  'Несовершеннолетний: ночью играть нельзя': 'A minor: no play at night',
+  'до {n}': 'under {n}',
+  'Дата рождения': 'Date of birth',
+  'возраст {n}': 'age {n}',
+  'Дата рождения не указана': 'Date of birth not given',
+  'Дату рождения меняет только касса': 'Only the desk changes the date of birth',
+  'Время — в виде ЧЧ:ММ': 'Time as HH:MM',
+  'Сумма подарка не может быть отрицательной': 'The gift amount cannot be negative',
+  'Окно — не больше 30 дней': 'The window is at most 30 days',
+  'Дата рождения не указана: до {from} можно не больше {n} мин': 'No date of birth: at most {n} min until {from}',
+  'Несовершеннолетним нельзя играть с {from} до {to}: можно не больше {n} мин':
+    'Minors may not play from {from} to {to}: at most {n} min',
+  'Несовершеннолетним нельзя играть с {from} до {to}': 'Minors may not play from {from} to {to}',
+  'С днём рождения! +{sum} бонусов': 'Happy birthday! +{sum} bonus',
+  'День рождения': 'Birthday',
+  'у клиента день рождения (± {n} дн.) и он играет в клубе':
+    'it is the client’s birthday (± {n} days) and they play at the club',
+  'у клиента день рождения и он играет в клубе': 'it is the client’s birthday and they play at the club',
+  'бонус {sum} на бонусный счёт и поздравление на экран, раз в год':
+    '{sum} bonus to the bonus account and a greeting on the screen, once a year',
+  'За год: {n}': 'This year: {n}',
+  'Сумма подарка': 'Gift amount',
+  'Окно, дней до и после': 'Window, days before and after',
+  'дн.': 'days',
+  'Поздравление на экране': 'Greeting on the screen',
+  '{bonus} — сумма. Пусто — «{sample}»': '{bonus} is the amount. Empty — “{sample}”',
+  'Игрок увидит: «{text}». Дата рождения — из карточки клиента; бонусы тратятся только на игровое время.':
+    'The player sees: “{text}”. The date of birth comes from the client card; bonuses pay for play time only.',
+  'Нет даты рождения': 'No date of birth',
+  'Ночной запрет для несовершеннолетних': 'Night curfew for minors',
+  'В эти часы несовершеннолетний не начнёт и не продлит сеанс ни на ПК, ни на кассе. Идущий сеанс получит предупреждения за 10 и 5 минут и завершится в начале запрета; неоплаченное время вернётся на баланс. Клиент без даты рождения считается несовершеннолетним. Гостей без аккаунта запрет не касается — за них отвечает касса.':
+    'In these hours a minor cannot start or extend a session, on a PC or at the desk. A running session is warned 10 and 5 minutes before and ends when the curfew starts; unused time goes back to the balance. A client without a date of birth counts as a minor. Guests without an account are not covered — the desk answers for them.',
+  'Запрет с': 'Curfew from',
+  'Запрет до': 'Curfew until',
+  'Изменения даты рождения': 'Date of birth changes',
+  'Игрок на ПК': 'Player at the PC',
+  'Было → стало': 'Before → after',
+  'Ночной запрет для несовершеннолетних: сеанс {name} завершён в {time}, неиспользованное время возвращено':
+    'Night curfew for minors: {name}’s session ended at {time}, unused time refunded',
+  'Ночной запрет для несовершеннолетних: сеанс завершится в {time}':
+    'Night curfew for minors: the session ends at {time}',
+  'Без даты рождения ночью играть нельзя: укажите её в карточке клиента':
+    'Without a date of birth there is no play at night: enter it in the client card',
   // D-106: the bonus account, play time only.
   'бонусы {sum}': 'bonus {sum}',
   'Бонус этого пополнения уже потрачен на время: на бонусах осталось {sum}':
@@ -3435,4 +3589,53 @@ export const EN: Record<string, string> = {
     'Bonus credited {credited} sum, play time paid with bonus {spent} sum — not money',
   'Бонусами за время': 'Play time paid with bonus',
   'Бонус {sum} — на бонусный счёт, только на время': 'Bonus {sum} — to the bonus account, play time only',
+  Истёк: 'Expired',
+  Исчерпан: 'Used up',
+  'Не работает': 'Not working',
+  '+{sum} сум бонусов': '+{sum} sum in bonuses',
+  'Скидка {pct} %': '{pct} % discount',
+  Скопировать: 'Copy',
+  'Скопировать код {code}': 'Copy code {code}',
+  'Новый промокод': 'New promo code',
+  'Клиент называет код на кассе или вводит его на своём ПК — бонус зачисляется на бонусный счёт и тратится только на игровое время. Каждый клиент применяет код один раз. Изменения сохраняются сразу.':
+    'A client tells the code at the desk or enters it on their PC — the bonus goes to the bonus account and is spent on play time only. Each client redeems a code once. Changes are saved at once.',
+  'Промокодов пока нет': 'No promo codes yet',
+  'Создайте код — например, для новых гостей или турнира.': 'Create a code — for new guests or a tournament, say.',
+  'Создать промокод': 'Create a promo code',
+  'Что даёт': 'Gives',
+  'Скидки по коду не поддерживаются': 'Discounts by code are not supported',
+  'без лимита': 'no limit',
+  'Действует до': 'Valid until',
+  'без срока': 'no end date',
+  'Изменить {code}': 'Edit {code}',
+  'Удалить {code}': 'Delete {code}',
+  'Промокод {code} создан': 'Promo code {code} created',
+  'Промокод {code} сохранён': 'Promo code {code} saved',
+  'Промокод {code} удалён': 'Promo code {code} deleted',
+  'Такой код уже есть': 'This code already exists',
+  'Введите код': 'Enter a code',
+  'Код — не длиннее 32 символов': 'The code is at most 32 characters',
+  'Только латинские буквы, цифры, «-» и «_»': 'Latin letters, digits, «-» and «_» only',
+  'Не меньше 1 — или оставьте пустым': 'At least 1 — or leave it empty',
+  'Дата уже прошла': 'This date has passed',
+  'Этого промокода уже нет — его удалили с другой кассы': 'This promo code is gone — it was deleted from another desk',
+  'Промокод {code}': 'Promo code {code}',
+  'Латинские буквы и цифры, до 32 символов': 'Latin letters and digits, up to 32 characters',
+  'Код не меняется: новый код — это новый промокод. Использовано: {used}.':
+    'The code does not change: a new code is a new promo code. Used: {used}.',
+  'Скидки по промокоду не поддерживаются: код станет бонусным — укажите сумму бонуса.':
+    'Discounts by promo code are not supported: the code becomes a bonus code — enter the bonus sum.',
+  'Бонус клиенту': 'Bonus to the client',
+  'Зачисляется на бонусный счёт: тратится только на игровое время, не на бар.':
+    'Goes to the bonus account: spent on play time only, not at the bar.',
+  'Сколько раз можно применить': 'How many times it can be redeemed',
+  'Пусто — без лимита': 'Empty — no limit',
+  'Лимит задаётся при создании кода': 'The limit is set when the code is created',
+  'Включительно. Пусто — без срока': 'Inclusive. Empty — no end date',
+  'Удалить промокод {code}?': 'Delete promo code {code}?',
+  'Клиенты больше не смогут его применить. Бонусы, уже начисленные по нему, останутся у клиентов.':
+    'Clients will no longer be able to redeem it. Bonuses already credited by it stay with the clients.',
+  'Удаляем…': 'Deleting…',
+  'Скидочный промокод не применяется — нужен бонусный':
+    'A discount promo code cannot be redeemed — a bonus code is needed',
 };

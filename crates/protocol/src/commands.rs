@@ -235,6 +235,9 @@ pub struct AuthRegisterRequest {
     /// The player's gender, `male` or `female`; required (D-104).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub gender: Option<String>,
+    /// The player's date of birth, `YYYY-MM-DD`; required (D-107).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub birth_date: Option<String>,
 }
 
 /// Response of `auth.status`.

@@ -244,7 +244,12 @@ public sealed class Buyer
     public bool Banned { get; init; }
     public bool Blacklisted { get; init; }
     public string? GroupId { get; init; }
-    public int? BirthYear { get; init; }
+
+    /// <summary><c>users.birth_date</c> as <c>YYYY-MM-DD</c> (D-107); null — not given.</summary>
+    public string? BirthDateText { get; init; }
+
+    public DateOnly? BirthDate => Users.BirthDates.Parse(BirthDateText);
+
     public long LifetimeSpent { get; init; }
 }
 
@@ -307,7 +312,8 @@ public sealed class SessionService(
     public static Task<Buyer?> BuyerAsync(NpgsqlConnection c, NpgsqlTransaction? tx, ClubInfo club, Guid userId) =>
         c.QuerySingleOrDefaultAsync<Buyer>(
             """
-            SELECT u.id, u.role, u.banned, coalesce(cp.blacklisted, false) AS blacklisted, cp.group_id, cp.birth_year,
+            SELECT u.id, u.role, u.banned, coalesce(cp.blacklisted, false) AS blacklisted, cp.group_id,
+                   to_char(u.birth_date, 'YYYY-MM-DD') AS birth_date_text,
                    coalesce(w.lifetime_spent, 0) AS lifetime_spent
             FROM users u
             LEFT JOIN client_profiles cp ON cp.user_id = u.id AND cp.club_id = @clubId
@@ -383,7 +389,7 @@ public sealed class SessionService(
         }
 
         await EnsureNothingOpenAsync(c, tx, pc.Id, buyer.Id);
-        CheckRules(pc.Zone, buyer, tariff, club, start, offlineReplay: replay);
+        CheckRules(pc.Zone, buyer, tariff, club, start, offlineReplay: replay, kiosk: staff is null && !replay);
 
         // Postpaid buys no minutes (its price is frozen per hour, §5.3): the kiosk sends none, any sent are ignored.
         int minutes;
@@ -399,6 +405,11 @@ public sealed class SessionService(
         {
             minutes = request.Minutes ?? throw ApiException.Validation("minutes", "required");
             CheckMinutes(tariff, minutes);
+        }
+
+        if (!replay && request.Prepaid)
+        {
+            CheckCurfewEnd(buyer, club, start, 0, minutes);
         }
 
         // A guest never starts postpaid from the kiosk, whatever account the guest button made; the desk and the offline
@@ -506,7 +517,7 @@ public sealed class SessionService(
             throw PolicyDenied("pcMaintenance");
         }
 
-        CheckRules(pc.Zone, buyer, tariff, club, now, offlineReplay: false);
+        CheckRules(pc.Zone, buyer, tariff, club, now, offlineReplay: false, kiosk: true);
         int priced;
         if (tariff.IsPackage)
         {
@@ -579,6 +590,7 @@ public sealed class SessionService(
             }
 
             await EnsureResumableAsync(c, tx, s);
+            await EnsureNoCurfewAsync(c, tx, s, now);
             s.Resume(now);
             return await CommitAsync(c, tx, s, now, new SessionEffects());
         }
@@ -618,6 +630,7 @@ public sealed class SessionService(
         if (s.State == "paused")
         {
             await EnsureResumableAsync(c, tx, s);
+            await EnsureNoCurfewAsync(c, tx, s, now);
             s.Resume(now);
         }
         else if (s.State == "locked")
@@ -740,7 +753,7 @@ public sealed class SessionService(
             throw PolicyDenied("pcMaintenance");
         }
 
-        CheckRules(zone, buyer, tariff, club, now, offlineReplay: false);
+        CheckRules(zone, buyer, tariff, club, now, offlineReplay: false, kiosk: staff is null && !notifyAgent);
         if (tariff.IsPackage)
         {
             minutes = tariff.PackageMinutes!.Value;
@@ -749,6 +762,9 @@ public sealed class SessionService(
         {
             throw ApiException.Validation("minutes", "max");
         }
+
+        // D-108: the time already bought plays out first, the new minutes after it.
+        CheckCurfewEnd(buyer, club, now, Math.Max(0, s.PurchasedSec - s.Used(now)), minutes);
 
         var quote = Pricing.Compute(tariff, minutes, buyer.GroupId, buyer.LifetimeSpent, zone, now, club.Pricing);
         if (quote.Total > 0)
@@ -1152,8 +1168,13 @@ public sealed class SessionService(
         }
     }
 
-    /// <summary>Rules 4–7 of §5.2 for a purchase at <paramref name="at"/> on a PC of <paramref name="zone"/>; the offline replay only rule 4.</summary>
-    private static void CheckRules(string zone, Buyer buyer, TariffRow tariff, ClubInfo club, DateTimeOffset at, bool offlineReplay)
+    /// <summary>
+    /// Rules 4–7 of §5.2 for a purchase at <paramref name="at"/> on a PC of <paramref name="zone"/>; the offline replay only
+    /// rule 4. Rule 5 (D-108): a minor in the forbidden hours is <c>403 policyDenied minorCurfew</c>, a member without a date
+    /// of birth then <c>birthDateRequired</c> (never taken for an adult); the player's own purchase on the PC
+    /// (<paramref name="kiosk"/>) needs the date at any hour (D-107: the shell asks for it first).
+    /// </summary>
+    private static void CheckRules(string zone, Buyer buyer, TariffRow tariff, ClubInfo club, DateTimeOffset at, bool offlineReplay, bool kiosk)
     {
         if (buyer.Banned || buyer.Blacklisted)
         {
@@ -1165,14 +1186,67 @@ public sealed class SessionService(
             return;
         }
 
-        if (club.Pricing.InCurfew(buyer.BirthYear, at))
+        if (kiosk && buyer.Role is "member" or "vip" && buyer.BirthDate is null)
         {
-            throw PolicyDenied("minorCurfew");
+            throw BirthDateRequired();
+        }
+
+        if (club.Pricing.InCurfew(buyer.Role, buyer.BirthDate, at))
+        {
+            throw buyer.BirthDate is null ? BirthDateRequired() : CurfewDenied(club.Pricing);
         }
 
         if (TariffRule(zone, tariff, club, at) is { } rule)
         {
             throw PolicyDenied(rule);
+        }
+    }
+
+    /// <summary>
+    /// <c>403 policyDenied minorCurfew</c> (D-108) with the forbidden hours: «Несовершеннолетним нельзя играть с 22:00 до
+    /// 06:00».
+    /// </summary>
+    public static ApiException CurfewDenied(ClubPricing club) =>
+        new(StatusCodes.Status403Forbidden, ErrorCode.PolicyDenied, club.CurfewText,
+            new { rule = "minorCurfew", reason = "minorCurfew", from = club.MinorCurfew, to = club.MinorCurfewEnd });
+
+    /// <summary><c>403 policyDenied birthDateRequired</c> (D-107/D-108): «Укажите дату рождения».</summary>
+    public static ApiException BirthDateRequired() =>
+        new(StatusCodes.Status403Forbidden, ErrorCode.PolicyDenied, "Укажите дату рождения",
+            new { rule = "birthDateRequired", reason = "birthDateRequired" });
+
+    /// <summary>
+    /// D-108: prepaid time of a minor (or of a member without a date of birth) that would still run at the next start of the
+    /// forbidden hours is refused rather than cut — a package is never refunded and a shortened purchase would charge for
+    /// minutes nobody asked for: <c>400 validation minutes curfew {maxMinutes, from, to}</c>, <c>maxMinutes</c> — the whole
+    /// minutes that still fit before it after the <paramref name="leftSec"/> already bought. The desk and the PC show «…
+    /// можно не больше N мин».
+    /// </summary>
+    private static void CheckCurfewEnd(Buyer buyer, ClubInfo club, DateTimeOffset now, int leftSec, int minutes)
+    {
+        if (club.Pricing.CurfewHolds(buyer.Role, buyer.BirthDate, now) is not { } holds
+            || club.Pricing.NextCurfewStart(now) is not { } curfew || now.AddSeconds(leftSec + (minutes * 60)) <= curfew)
+        {
+            return;
+        }
+
+        var maxMinutes = Math.Max(0, (int)Math.Floor((curfew - now).TotalMinutes - (leftSec / 60.0)));
+        throw new ApiException(StatusCodes.Status400BadRequest, ErrorCode.Validation, $"{club.Pricing.CurfewText}: не больше {maxMinutes} мин",
+            new
+            {
+                field = "minutes", reason = "curfew", maxMinutes, from = club.Pricing.MinorCurfew, to = club.Pricing.MinorCurfewEnd,
+                noBirthDate = holds == "noBirthDate" ? true : (bool?)null,
+            });
+    }
+
+    /// <summary>A paused session of a minor (or of a member without a date of birth) does not resume in the forbidden hours (D-108).</summary>
+    private static async Task EnsureNoCurfewAsync(NpgsqlConnection c, NpgsqlTransaction tx, SessionRow s, DateTimeOffset now)
+    {
+        var club = await ClubAsync(c, tx, s.ClubId);
+        var buyer = await BuyerAsync(c, tx, club, s.UserId) ?? throw ApiException.NotFound("user");
+        if (club.Pricing.InCurfew(buyer.Role, buyer.BirthDate, now))
+        {
+            throw buyer.BirthDate is null ? BirthDateRequired() : CurfewDenied(club.Pricing);
         }
     }
 

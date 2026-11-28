@@ -126,6 +126,22 @@ public sealed class SessionTimerTests : IDisposable
     }
 
     [Fact]
+    public void OpenEnded_TakesTheServersMoneyMarks_AndTellsOnlyTheNewOneWithTheFewestMinutes()
+    {
+        _timer.Start(0, openEnded: true);
+
+        _timer.AdoptServerWarnings([15]).Should().Be(15);
+        _timer.AdoptServerWarnings([15]).Should().BeNull("a mark is warned once");
+        _timer.AdoptServerWarnings([15, 5, 1]).Should().Be(1, "marks reached together warn once, with the fewer minutes");
+        _timer.AdoptServerWarnings([]).Should().BeNull("a top-up took the marks back");
+        _timer.WarningsSent.Should().BeEmpty();
+        _timer.AdoptServerWarnings([15]).Should().Be(15, "a mark taken back warns again");
+
+        _timer.Start(600, openEnded: false);
+        _timer.AdoptServerWarnings([5]).Should().BeNull("a bounded countdown keeps its own marks");
+    }
+
+    [Fact]
     public void OpenEnded_CountsUsageOnly()
     {
         _timer.Start(0, openEnded: true);
@@ -707,6 +723,26 @@ public sealed class SessionManagerTests : IDisposable
     }
 
     [Fact]
+    public void Offline_curfew_holds_minors_and_players_without_a_date_of_birth()
+    {
+        // D-108 from the cached player and the server's offline.minorCurfew, on the PC's local clock.
+        var curfew = new MinorCurfewSettings { Enabled = true, MinorAge = 18, From = "22:00", To = "06:00" };
+        var today = DateTime.Today;
+        DateTimeOffset At(int hour, int minute) =>
+            new(today.AddHours(hour).AddMinutes(minute), TimeZoneInfo.Local.GetUtcOffset(today.AddHours(hour)));
+        var minor = Player(0) with { BirthDate = today.AddYears(-15).ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture) };
+        var adult = Player(0) with { BirthDate = "1990-01-01" };
+
+        SessionManager.MinorCurfewMinutes(minor, curfew, At(21, 30)).Should().Be(30);
+        SessionManager.MinorCurfewMinutes(minor, curfew, At(23, 0)).Should().Be(0, "inside the forbidden hours");
+        SessionManager.MinorCurfewMinutes(minor, curfew, At(5, 59)).Should().Be(0);
+        SessionManager.MinorCurfewMinutes(Player(0), curfew, At(21, 0)).Should().Be(60, "no date of birth is never taken for an adult");
+        SessionManager.MinorCurfewMinutes(adult, curfew, At(23, 0)).Should().BeNull();
+        SessionManager.MinorCurfewMinutes(minor, new MinorCurfewSettings(), At(23, 0)).Should().BeNull("an agent the server told nothing enforces nothing");
+        SessionManager.MinorCurfewMinutes(minor with { Role = Contracts.Users.UserRole.Guest }, curfew, At(23, 0)).Should().BeNull();
+    }
+
+    [Fact]
     public async Task Offline_start_without_a_known_balance_or_tariff_is_refused()
     {
         _server.CreateSessionAsync(Arg.Any<SessionCreateRequest>(), Arg.Any<Guid>(), Arg.Any<CancellationToken>()).ThrowsAsync(Unavailable());
@@ -753,6 +789,33 @@ public sealed class SessionManagerTests : IDisposable
 
         session.Cost.Should().Be(Money.Uzs(6_000));
         _manager.IsOfflineSession.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task Pay_as_you_go_tells_the_shell_when_the_server_reaches_a_money_mark_once_and_again_after_a_top_up()
+    {
+        // D-109: the server counts the minutes the money still pays for; the PC shows its marks as session.warning.
+        Guid id = Guid.NewGuid();
+        PlaySession postpaid = ServerSession(id, secondsLeft: PlaySession.OpenEnded, cost: 0) with { IsPrepaid = false, EndsAt = null };
+        _server.CreateSessionAsync(Arg.Any<SessionCreateRequest>(), Arg.Any<Guid>(), Arg.Any<CancellationToken>()).Returns(postpaid);
+        await _manager.StartAsync(new SessionCreateRequest(PcId, UserId, TariffId, null, Prepaid: false), CancellationToken.None);
+
+        List<int> Warned() => Events().Where(e => e.Type == SessionEventType.Warning).Select(e => e.DataAs<SessionWarningData>()!.MinutesLeft).ToList();
+
+        await _manager.ApplyServerSessionAsync(postpaid with { WarningsSent = [10] }, CancellationToken.None);
+        await _manager.ApplyServerSessionAsync(postpaid with { WarningsSent = [10] }, CancellationToken.None);
+        Warned().Should().Equal(10);
+
+        await _manager.ApplyServerSessionAsync(postpaid with { WarningsSent = [10, 7] }, CancellationToken.None);
+        Warned().Should().Equal(10, 7);
+
+        // A top-up: the server takes the marks back, and the next time the money runs low it warns again.
+        await _manager.ApplyServerSessionAsync(postpaid with { WarningsSent = [] }, CancellationToken.None);
+        await _manager.ApplyServerSessionAsync(postpaid with { WarningsSent = [10] }, CancellationToken.None);
+        Warned().Should().Equal(10, 7, 10);
+
+        // The server counted these itself: none is queued for it again.
+        (await _store.DequeueBatchAsync(100, CancellationToken.None)).Should().NotContain(q => q.Event.Type == SessionEventType.Warning);
     }
 
     [Fact]

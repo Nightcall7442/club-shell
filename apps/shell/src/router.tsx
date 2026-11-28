@@ -225,8 +225,8 @@ export function overlayMessage(
     const minutes = p['minutesLeft'];
     return {
       title: t('session.warningTitle'),
-      body: minutes > 0 ? t('session.warningMinutes', { minutes }) : t('session.lastMinute'),
-      level: minutes <= 1 ? 'error' : 'warning',
+      body: minutes > 0 ? t('session.lowTime', { count: minutes }) : t('session.lastMinute'),
+      level: minutes <= 5 ? 'error' : 'warning',
     };
   }
   const adminName = str(p, 'adminName');
@@ -361,9 +361,13 @@ export function OverlayScreen(): JSX.Element | null {
         )}
         <div className="min-w-0 flex-1">
           <p className="text-xs font-semibold text-muted">{m.title}</p>
-          <p className="mt-1 truncate text-[length:var(--fs-xl)] font-bold leading-tight text-text">
+          <p className="mt-1 line-clamp-2 text-[length:var(--fs-xl)] font-bold leading-tight text-text">
             {m.body || m.title}
           </p>
+          {/* A low-time warning (D-109): the in-game panel extends the time without leaving the game. */}
+          {minutes !== null && minutes > 0 && (
+            <p className="mt-1.5 text-xs font-medium text-muted">{t('session.lowTimeHud')}</p>
+          )}
         </div>
         <Badge tone={levelTone(m.level)} size="sm" className="shrink-0">
           {t(`notifications.${m.level}`)}

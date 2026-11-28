@@ -36,6 +36,8 @@ public sealed class ConfigTests(ServerFixture server) : IClassFixture<ServerFixt
         Assert.False(config.GetProperty("updates").GetProperty("enabled").GetBoolean());
         Assert.True(config.GetProperty("anticheat").GetProperty("reportViolations").GetBoolean());
         Assert.Equal(60, config.GetProperty("session").GetProperty("graceSec").GetInt32());
+        // D-109: the low-time marks the owner has not set (the agent adds the last minute).
+        Assert.Equal([10, 7, 5], config.GetProperty("session").GetProperty("warningMinutes").EnumerateArray().Select(m => m.GetInt32()));
         Assert.Equal(240, config.GetProperty("offline").GetProperty("maxOfflineMinutes").GetInt32());
         Assert.Equal("ClubShell", config.GetProperty("shell").GetProperty("club").GetProperty("name").GetString());
         Assert.Equal(agent.Registration.GetProperty("pc").GetProperty("number").GetInt32(), config.GetProperty("number").GetInt32());
@@ -72,6 +74,15 @@ public sealed class ConfigTests(ServerFixture server) : IClassFixture<ServerFixt
     [InlineData("""{"features":{"callAdmin":false}}""", false)]
     public void Served_callAdmin_follows_the_owner_setting_default_true(string? settings, bool callAdmin) =>
         Assert.Equal(callAdmin, Agents.AgentConfig.FeaturesOf(settings).GetProperty("callAdmin").GetBoolean());
+
+    [Theory]
+    [InlineData(null, "10,7,5")]
+    [InlineData("""{"limits":{"minorAge":18}}""", "10,7,5")]
+    [InlineData("""{"limits":{"warningMinutes":null}}""", "10,7,5")]
+    [InlineData("""{"limits":{"warningMinutes":[]}}""", "")]
+    [InlineData("""{"limits":{"warningMinutes":[5,15,1,15]}}""", "15,5")]
+    public void The_pc_gets_the_owners_low_time_marks_without_the_last_minute(string? settings, string marks) =>
+        Assert.Equal(marks, string.Join(",", Sessions.Billing.ClubPricing.WarningMinutesOf(settings)));
 
     [Fact]
     public async Task Policies_carry_the_seed_with_an_etag_and_a_reseed_bumps_the_version()

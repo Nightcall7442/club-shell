@@ -181,7 +181,7 @@ public sealed class SessionTimer : IDisposable
         ArgumentOutOfRangeException.ThrowIfNegative(secondsUsed);
         lock (_gate)
         {
-            _marks = _settings.CurrentValue.Session.EffectiveWarningMinutes().Where(m => m > 0).Distinct().OrderByDescending(m => m).ToArray();
+            _marks = _settings.CurrentValue.Session.EffectiveWarningMinutes();
             _running = true;
             _paused = false;
             _openEnded = openEnded;
@@ -254,6 +254,31 @@ public sealed class SessionTimer : IDisposable
             FoldNoLock();
             _leftAtAnchor += seconds;
             RearmNoLock();
+        }
+    }
+
+    /// <summary>
+    /// An open-ended (postpaid) session has no countdown here: the server knows the money left and owns its marks (D-109,
+    /// <c>SessionTickWorker.WarnAsync</c>: the minutes the balance, bonuses and the session's debt limit still pay for).
+    /// Takes the server's <c>warningsSent</c> as the marks sent (a mark it took back after a top-up is re-armed) and
+    /// returns the fewest minutes among the marks that are new to this PC, the warning to show; null when none is new or
+    /// the countdown is bounded (its marks are this timer's own).
+    /// </summary>
+    public int? AdoptServerWarnings(IEnumerable<int> serverMarks)
+    {
+        ArgumentNullException.ThrowIfNull(serverMarks);
+        lock (_gate)
+        {
+            if (!_running || !_openEnded)
+            {
+                return null;
+            }
+
+            var next = serverMarks.Where(m => m > 0).Distinct().ToList();
+            var fresh = next.Except(_warningsSent).ToList();
+            _warningsSent.Clear();
+            _warningsSent.AddRange(next);
+            return fresh.Count > 0 ? fresh.Min() : null;
         }
     }
 

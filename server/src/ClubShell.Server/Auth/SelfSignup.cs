@@ -20,7 +20,8 @@ namespace ClubShell.Server.Auth;
 /// keeps the tokens as for a sign-in. Abuse limits: <see cref="MaxPerPc"/> accounts per PC in <see cref="Window"/>
 /// (<c>429 rateLimited {reason: signupLimit, retryAfterSec}</c>, counted on <c>users.signup_pc_id</c> under the PC's
 /// lock), a password of 4–64 characters, the club rules accepted when the club has any (<c>400 acceptRules
-/// required</c>) and the player's gender (D-104, <c>400 gender required|enum</c>). Each account leaves a <c>clientSelfSignup</c> journal row (no staff member, the PC) for the owner.
+/// required</c>), the player's gender (D-104, <c>400 gender required|enum</c>) and date of birth (D-107, <c>400 birthDate
+/// required|format|future|min|max</c>). Each account leaves a <c>clientSelfSignup</c> journal row (no staff member, the PC) for the owner.
 /// <para>
 /// A mobile app of the club would need its own way in: this route trusts the PC's signed agent requests, which a phone
 /// does not have (a public route would want a captcha or an SMS code and its own rate limit per address).
@@ -85,8 +86,10 @@ public static class SelfSignup
             throw ApiException.Validation("password", password.Length < 4 ? "min" : "max");
         }
 
-        // D-104: every new account says the player's gender.
+        // D-104: every new account says the player's gender; D-107: and the date of birth.
         var gender = Genders.Required(request.Gender);
+        var club = await SessionService.ClubAsync(c, null, pc.ClubId);
+        var birthDate = BirthDates.Format(BirthDates.Required(request.BirthDate, BirthDates.Today(clock.GetUtcNow(), club.Pricing.TimeZone)));
 
         if (HasRules(settings.RootElement) && request.AcceptRules != true)
         {
@@ -103,7 +106,6 @@ public static class SelfSignup
         // PBKDF2 outside the transaction: it holds no lock while it derives.
         var hash = Passwords.Hash(password);
         var offlineHash = options.OfflineLogin ? Passwords.Hash(password) : null;
-        var club = await SessionService.ClubAsync(c, null, pc.ClubId);
         return TypedResults.Ok(await PlayerAuthEndpoints.SignInAsync(c, tokens, sessions, club, pc, async tx =>
         {
             // Under the PC's lock (SignInAsync takes it first): parallel presses on one PC cannot all pass the count.
@@ -135,16 +137,17 @@ public static class SelfSignup
                 await c.ExecuteAsync("SAVEPOINT self_signup", transaction: tx);
                 await c.ExecuteAsync(
                     """
-                    INSERT INTO users (id, network_id, username, display_name, role, password_hash, locale, signup_pc_id, gender, created_at, last_seen_at)
-                    VALUES (@id, @NetworkId, @username, @displayName, 'member', @hash, @locale, @pcId, @gender, @now, @now);
+                    INSERT INTO users (id, network_id, username, display_name, role, password_hash, locale, signup_pc_id, gender, birth_date, created_at, last_seen_at)
+                    VALUES (@id, @NetworkId, @username, @displayName, 'member', @hash, @locale, @pcId, @gender, @birthDate::date, @now, @now);
                     INSERT INTO wallets (user_id, network_id, updated_at) VALUES (@id, @NetworkId, @now);
-                    INSERT INTO client_profiles (club_id, user_id, phone, updated_at) VALUES (@ClubId, @id, @phone, @now);
+                    INSERT INTO client_profiles (club_id, user_id, phone, birth_year, updated_at)
+                    VALUES (@ClubId, @id, @phone, extract(year FROM @birthDate::date)::int, @now);
                     INSERT INTO audit_entries (id, club_id, at, staff_id, staff_name, action, user_id, pc_id, detail, meta)
                     VALUES (@auditId, @ClubId, @now, NULL, '', 'clientSelfSignup', @id, @pcId, @detail, @meta::jsonb);
                     """,
                     new
                     {
-                        id, club.NetworkId, pc.ClubId, username, displayName, hash, locale, pcId = pc.Id, now, phone, gender,
+                        id, club.NetworkId, pc.ClubId, username, displayName, hash, locale, pcId = pc.Id, now, phone, gender, birthDate,
                         auditId = Guid.CreateVersion7(now), detail = $"{displayName} · {username} · {pc.Name}",
                         meta = JsonSerializer.Serialize(new { username, pcName = pc.Name, generated = typed is null }, ServerJson.Options),
                     },

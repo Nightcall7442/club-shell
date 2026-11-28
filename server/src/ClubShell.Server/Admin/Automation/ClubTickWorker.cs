@@ -10,7 +10,8 @@ namespace ClubShell.Server.Admin;
 /// The club minute (DESIGN §8), every 60 s under <c>pg_advisory_lock(CSClub)</c>, per club: when the set of banners live on
 /// the club's local date differs from the one last sent (<c>clubs.banners_hash</c>, OQ-21) — a banner's <c>from</c>/<c>to</c>
 /// passed at midnight — <c>config_version + 1</c> and <c>refreshConfig {config:true}</c> to the connected PCs; then the
-/// <c>minutesLeft</c> automation (<see cref="AutomationService.MinutesLeftAsync"/>). Tests call <see cref="RunOnceAsync"/>.
+/// <c>minutesLeft</c> automation (<see cref="AutomationService.MinutesLeftAsync"/>) and the birthday gift of the players in the
+/// club (D-107, <see cref="AutomationService.BirthdaysAsync"/>). Tests call <see cref="RunOnceAsync"/>.
 /// </summary>
 public sealed class ClubTickWorker(
     NpgsqlDataSource db, AutomationService automation, CommandDispatcher commands, AgentSocketHub hub, TimeProvider clock, ILogger<ClubTickWorker> logger)
@@ -30,6 +31,7 @@ public sealed class ClubTickWorker(
         {
             await BannersAsync(clubId, cancellationToken);
             await automation.MinutesLeftAsync(clubId);
+            await automation.BirthdaysAsync(clubId);
         }
     }
 

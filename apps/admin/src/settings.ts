@@ -18,6 +18,16 @@ export interface ClubSettingsState {
   save: () => Promise<boolean>;
   reset: () => void;
   reload: () => Promise<void>;
+  /**
+   * Saves one key at once, outside the draft and the save bar (the promo codes: each code is saved by its own dialog).
+   * `update` gets the key as the server has it now (read fresh, so another console's change is not overwritten) and
+   * returns the value to save; the saved value then replaces the key in both the loaded copy and the draft, leaving the
+   * draft's other unsaved changes as they are. Throws what the server refused, for the caller to show.
+   */
+  commit: <K extends keyof ClubSettings>(
+    key: K,
+    update: (current: ClubSettings[K]) => ClubSettings[K],
+  ) => Promise<void>;
 }
 
 export function useClubSettings(): ClubSettingsState {
@@ -72,6 +82,18 @@ export function useClubSettings(): ClubSettingsState {
     }
   };
 
+  const commit = useCallback(
+    async <K extends keyof ClubSettings>(key: K, update: (current: ClubSettings[K]) => ClubSettings[K]) => {
+      const before = await clubApi.settings();
+      await clubApi.saveSettings({ [key]: update(before[key]) } as Partial<ClubSettings>);
+      const after = await clubApi.settings();
+      const take = (d: ClubSettings | null): ClubSettings => (d ? { ...d, [key]: after[key] } : after);
+      setData(take);
+      setDraft(take);
+    },
+    [],
+  );
+
   return {
     data,
     draft,
@@ -82,5 +104,6 @@ export function useClubSettings(): ClubSettingsState {
     save,
     reset: () => setDraft(data),
     reload,
+    commit,
   };
 }

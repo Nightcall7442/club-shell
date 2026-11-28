@@ -286,6 +286,8 @@ export interface AuthRegisterRequest {
   acceptRules?: boolean | null;
   /** The player's gender, `male` or `female`; required (D-104). */
   gender?: string | null;
+  /** The player's date of birth, `YYYY-MM-DD`; required (D-107). */
+  birthDate?: string | null;
 }
 
 /** Response of `auth.status`. */

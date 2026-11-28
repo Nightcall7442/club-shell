@@ -33,6 +33,7 @@ import {
   type UserRecord,
 } from './db.js';
 import { pushToUser, sendCommand } from './ws.js';
+import { giveBirthday, tickBirthdays } from './minors.js';
 
 // ---------------------------------------------------------------------------------------------------------------------
 // Types
@@ -312,7 +313,9 @@ export type AuditAction =
   | 'stockCreate'
   | 'stockArchive'
   // D-91: a desk top-up taken back; listed by /admin/control apart (`corrections`), not in its journal.
-  | 'topUpCancel';
+  | 'topUpCancel'
+  // D-107: a date of birth set; listed by /admin/control apart (`birthDates`), not in its journal.
+  | 'clientBirthDate';
 
 export interface AuditEntry {
   id: string;
@@ -377,6 +380,12 @@ export interface ClubConfig {
   topUpPromo?: TopUpPromo;
   screensaver?: ScreensaverSettings;
   promoCodes: PromoCode[];
+  /**
+   * Who redeemed which code (upper-cased code → user ids), as the server's `promo_redemptions`: a client redeems a code
+   * once. A code dropped from `promoCodes` takes its redemptions with it (the server soft-deletes the row, and a new code
+   * of the same name is a new row). Absent — none yet.
+   */
+  promoRedemptions?: Record<string, string[]>;
   happyHours: HappyHour[];
   loyalty: LoyaltyLevel[];
   /**
@@ -394,7 +403,20 @@ export interface ClubConfig {
     autoExtendMinutes?: number;
     /** Players create their own account on the lock screen (D-92); absent — off. */
     selfSignup?: boolean;
+    /**
+     * Minutes left at which the player is warned that the time (or the money of a capped postpaid) runs out (D-109);
+     * absent or null — 10, 7, 5. The last minute is always warned too.
+     */
+    warningMinutes?: number[] | null;
+    /** D-108: the minors' night curfew; absent — on. */
+    minorCurfewEnabled?: boolean;
+    /** D-108: the end of the forbidden hours; absent — 06:00. */
+    minorCurfewEnd?: string;
   };
+  /** D-107: the birthday gift (`minors.ts`); absent — the off example. */
+  birthdayGift?: import('./minors.js').BirthdayGift;
+  /** D-107: gifts given, `userId:year` → when (once per birthday year, across restarts). */
+  birthdayGiven?: Record<string, string>;
   catalog: { order: string[]; hidden: string[]; featured: string[] };
   banners: Banner[];
   rulesText: { ru: string; uz: string; en: string };
@@ -594,18 +616,6 @@ export function loyaltyOf(userId: string): LoyaltyLevel {
 
 export function visitsOf(userId: string): number {
   return db.sessions.filter((s) => s.userId === userId).length;
-}
-
-export function isMinor(userId: string, at = new Date()): boolean {
-  const year = profileOf(userId).birthYear;
-  return year !== null && at.getFullYear() - year < club().limits.minorAge;
-}
-
-/** `true` when the curfew for minors is in effect at this local time. */
-export function inCurfew(at = new Date()): boolean {
-  const [h, m] = club().limits.minorCurfew.split(':').map(Number) as [number, number];
-  const mins = at.getHours() * 60 + at.getMinutes();
-  return mins >= h * 60 + m || mins < 6 * 60;
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -844,6 +854,8 @@ function fire(rule: AutomationRule, target: { pcId?: string | null; user?: UserR
 export const clubHooks = {
   sessionOpened(rec: SessionRecord): void {
     const user = findUser(rec.userId) ?? null;
+    // D-107: the birthday gift, when it is due.
+    if (user) giveBirthday(user, rec.pcId);
     const visits = visitsOf(rec.userId);
     for (const r of club().automation) {
       if (!r.enabled) continue;
@@ -901,6 +913,7 @@ export function tickClub(t: number): void {
     if (offline && !offlineSince.get(pc.id)) emit('pcOffline', pc.name, { pcId: pc.id });
     offlineSince.set(pc.id, offline);
   }
+  tickBirthdays(t);
   for (const r of c.automation) {
     if (!r.enabled) continue;
     if (r.trigger.kind === 'minutesLeft') {

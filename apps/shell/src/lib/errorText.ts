@@ -40,6 +40,8 @@ const REASON_KEYS: ReadonlySet<string> = new Set([
   'guestDisabled',
   'offlineUnavailable',
   'otherUser',
+  // D-107: the date of birth is set; only the desk changes it.
+  'birthDateLocked',
 ]);
 
 /** A sign-in or an unlock form (wrong secrets, lockouts and empty fields read as such). */
@@ -92,6 +94,12 @@ export function errorText(code: string, details: unknown, context: ErrorContext 
       if (reason === 'banned' || reason === 'blacklisted') {
         return one('lock.banned');
       }
+      // D-108: a minor in the forbidden hours, with the club's hours when the server names them.
+      if (reason === 'ageRestricted' && typeof d['from'] === 'string' && typeof d['to'] === 'string') {
+        vars['from'] = d['from'];
+        vars['to'] = d['to'];
+        return one('errors.reason.ageRestrictedHours', 'errors.reason.ageRestricted');
+      }
       if (reason !== null && REASON_KEYS.has(reason)) {
         return one(`errors.reason.${reason}`, 'errors.forbidden');
       }
@@ -115,6 +123,12 @@ export function errorText(code: string, details: unknown, context: ErrorContext 
     case 'policyDenied': {
       // Which club rule said no (`rule` from the server's policy engine, `reason` from the Agent's own checks).
       const rule = typeof d['rule'] === 'string' ? d['rule'] : reason;
+      // D-108: «Несовершеннолетним нельзя играть с 22:00 до 06:00».
+      if (rule === 'minorCurfew' && typeof d['from'] === 'string' && typeof d['to'] === 'string') {
+        vars['from'] = d['from'];
+        vars['to'] = d['to'];
+        return one('errors.policy.minorCurfewHours', 'errors.policy.minorCurfew');
+      }
       return rule && !rule.includes('.')
         ? one(`errors.policy.${rule}`, 'errors.policyDenied')
         : one('errors.policyDenied');
@@ -129,6 +143,16 @@ export function errorText(code: string, details: unknown, context: ErrorContext 
       return one('errors.rateLimited');
     case 'validation': {
       const field = d['field'];
+      // D-108: a minor's purchase that would still run when the forbidden hours start.
+      if (field === 'minutes' && reason === 'curfew' && typeof d['maxMinutes'] === 'number') {
+        vars['minutes'] = d['maxMinutes'];
+        vars['from'] = typeof d['from'] === 'string' ? d['from'] : '22:00';
+        vars['to'] = typeof d['to'] === 'string' ? d['to'] : '06:00';
+        if (d['noBirthDate'] === true) return one('errors.policy.birthDateRequired');
+        return d['maxMinutes'] > 0
+          ? one('errors.policy.minorCurfewUntil', 'errors.policy.minorCurfew')
+          : one('errors.policy.minorCurfewHours', 'errors.policy.minorCurfew');
+      }
       if (isForm(context)) {
         if (field === 'username') return one('lock.usernameRequired');
         if (field === 'password') return one('lock.passwordRequired');

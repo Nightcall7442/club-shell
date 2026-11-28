@@ -123,7 +123,7 @@ public static class ClientEndpoints
     /// ponytail: the whole client list is read per search, as the contract has no paging; add a trigram index when a club
     /// outgrows it.
     /// </summary>
-    private static async Task<IResult> ListAsync(HttpContext context, string? q, NpgsqlDataSource db)
+    private static async Task<IResult> ListAsync(HttpContext context, string? q, NpgsqlDataSource db, TimeProvider clock)
     {
         var staff = context.Features.GetRequiredFeature<StaffContext>();
         var term = (q ?? "").Trim().ToLowerInvariant();
@@ -139,7 +139,7 @@ public static class ClientEndpoints
         var items = rows
             .Where(r => term.Length == 0 || r.DisplayName.ToLowerInvariant().Contains(term, StringComparison.Ordinal)
                 || r.Username.ToLowerInvariant().Contains(term, StringComparison.Ordinal) || r.Phone.Contains(term, StringComparison.Ordinal))
-            .Select(r => r.ToWire(club.Pricing))
+            .Select(r => r.ToWire(club.Pricing, clock.GetUtcNow()))
             .ToList();
         return AdminJson.Ok(new AdminClientList(items));
     }
@@ -151,12 +151,13 @@ public static class ClientEndpoints
     /// the most recently active first (a login at a PC, a wallet movement, registration). ponytail: matched in memory, as
     /// <see cref="ListAsync"/> does.
     /// </summary>
-    private static async Task<IResult> LookupAsync(HttpContext context, string? q, NpgsqlDataSource db)
+    private static async Task<IResult> LookupAsync(HttpContext context, string? q, NpgsqlDataSource db, TimeProvider clock)
     {
         var staff = context.Features.GetRequiredFeature<StaffContext>();
         var term = (q ?? "").Trim();
         var recent = term.Length < 2;
         await using var c = await db.OpenConnectionAsync();
+        var club = await SessionService.ClubAsync(c, null, staff.ClubId);
         var rows = await c.QueryAsync<LookupRow>(
             $"""
             {LookupRow.Select}
@@ -167,7 +168,7 @@ public static class ClientEndpoints
         var text = term.ToLowerInvariant();
         var digits = QueryDigits(term);
         var items = recent ? rows : rows.Select(r => (Row: r, Rank: r.Rank(text, digits))).Where(m => m.Rank >= 0).OrderBy(m => m.Rank).Select(m => m.Row);
-        return AdminJson.Ok(new AdminClientLookupList(items.Take(8).Select(r => r.ToWire()).ToList()));
+        return AdminJson.Ok(new AdminClientLookupList(items.Take(8).Select(r => r.ToWire(club.Pricing, clock.GetUtcNow())).ToList()));
     }
 
     /// <summary>The digits of a <c>q</c> that reads as a phone (digits, spaces, <c>+ - ( )</c>), else null.</summary>
@@ -185,7 +186,7 @@ public static class ClientEndpoints
     /// trimmed, 3–32 characters, <c>400 username min|max</c>; a phone number becomes its digits). Checks in the mock's
     /// order: fields, login taken, card taken.
     /// </summary>
-    private static async Task<IResult> AddAsync(HttpContext context, [FromBody] JsonElement body, IdempotencyStore store, TimeProvider clock)
+    private static async Task<IResult> AddAsync(HttpContext context, [FromBody] JsonElement body, IdempotencyStore store, NpgsqlDataSource db, TimeProvider clock)
     {
         var staff = context.Features.GetRequiredFeature<StaffContext>();
         var r = Api.Read<AdminClientCreateRequest>(body, "displayName");
@@ -197,6 +198,12 @@ public static class ClientEndpoints
         var groupId = AdminInput.OptionalText(r.GroupId, "groupId", 64);
         var card = Card(r.CardId);
         var gender = Genders.Required(r.Gender);
+        string birthDate;
+        await using (var lc = await db.OpenConnectionAsync())
+        {
+            var zone = (await SessionService.ClubAsync(lc, null, staff.ClubId)).Pricing.TimeZone;
+            birthDate = BirthDates.Format(BirthDates.Required(r.BirthDate, BirthDates.Today(clock.GetUtcNow(), zone)));
+        }
 
         // PBKDF2 outside the transaction: it holds no lock while it derives.
         var hash = Passwords.Hash(password ?? Convert.ToBase64String(RandomNumberGenerator.GetBytes(32)));
@@ -218,22 +225,22 @@ public static class ClientEndpoints
             await CardFreeAsync(c, tx, staff, card, id);
             await UniqueAsync(c, tx, () => c.ExecuteAsync(
                 """
-                INSERT INTO users (id, network_id, username, display_name, role, password_hash, card_id, gender, created_at)
-                VALUES (@id, @NetworkId, @username, @displayName, 'member', @hash, @card, @gender, @now);
+                INSERT INTO users (id, network_id, username, display_name, role, password_hash, card_id, gender, birth_date, created_at)
+                VALUES (@id, @NetworkId, @username, @displayName, 'member', @hash, @card, @gender, @birthDate::date, @now);
                 INSERT INTO wallets (user_id, network_id, updated_at) VALUES (@id, @NetworkId, @now);
                 INSERT INTO client_profiles (club_id, user_id, group_id, phone, birth_year, updated_at)
-                VALUES (@ClubId, @id, @groupId, @phone, @birthYear, @now);
+                VALUES (@ClubId, @id, @groupId, @phone, extract(year FROM @birthDate::date)::int, @now);
                 """,
-                new { id, staff.NetworkId, staff.ClubId, username, displayName, hash, card, groupId, phone, birthYear, gender, now },
+                new { id, staff.NetworkId, staff.ClubId, username, displayName, hash, card, groupId, phone, birthDate, gender, now },
                 tx));
-            await Audit.WriteAsync(c, tx, staff, now, "clientAdd", id, detail: $"{displayName} · {username}");
+            await Audit.WriteAsync(c, tx, staff, now, "clientAdd", id, detail: $"{displayName} · {username}", meta: new { birthDate });
             if (groupId is not null)
             {
                 // Like a PATCH into a group: the control page flags a big discount from this entry.
                 await GroupAuditAsync(c, tx, staff, now, id, groupId, displayName);
             }
 
-            return new IdempotentResult(StatusCodes.Status200OK, AdminJson.ToElement(new AdminClientResponse(await ViewAsync(c, tx, staff, id))));
+            return new IdempotentResult(StatusCodes.Status200OK, AdminJson.ToElement(new AdminClientResponse(await ViewAsync(c, tx, staff, id, now))));
         });
     }
 
@@ -264,6 +271,14 @@ public static class ClientEndpoints
         var phone = AdminInput.OptionalText(r.Phone, "phone", 32);
         var birthYear = AdminInput.Range(r.BirthYear, "birthYear", 1900, 2100);
         var gender = AdminInput.Has(body, "gender") ? Genders.Required(r.Gender) : null;
+        string? birthDate = null;
+        if (AdminInput.Has(body, "birthDate"))
+        {
+            await using var lc = await db.OpenConnectionAsync();
+            var zone = (await SessionService.ClubAsync(lc, null, staff.ClubId)).Pricing.TimeZone;
+            birthDate = BirthDates.Format(BirthDates.Required(r.BirthDate, BirthDates.Today(clock.GetUtcNow(), zone)));
+        }
+
         if (AdminInput.Has(body, "blacklisted") && r.Blacklisted is null)
         {
             throw ApiException.Validation("blacklisted", "format");
@@ -282,6 +297,8 @@ public static class ClientEndpoints
                 new { staff.ClubId, userId, now }, tx);
             var before = await c.QuerySingleAsync<(string? GroupId, bool Blacklisted)>(
                 "SELECT group_id, blacklisted FROM client_profiles WHERE club_id = @ClubId AND user_id = @userId FOR UPDATE", new { staff.ClubId, userId }, tx);
+            var birthBefore = await c.ExecuteScalarAsync<string?>(
+                "SELECT to_char(birth_date, 'YYYY-MM-DD') FROM users WHERE id = @userId", new { userId }, tx);
             await c.ExecuteAsync(
                 """
                 UPDATE client_profiles
@@ -291,16 +308,26 @@ public static class ClientEndpoints
                     birth_year = CASE WHEN @hasBirthYear THEN @birthYear ELSE birth_year END,
                     blacklisted = coalesce(@Blacklisted, blacklisted), updated_at = @now
                 WHERE club_id = @ClubId AND user_id = @userId;
-                UPDATE users SET display_name = coalesce(@displayName, display_name), gender = coalesce(@gender, gender) WHERE id = @userId;
+                UPDATE users SET display_name = coalesce(@displayName, display_name), gender = coalesce(@gender, gender),
+                                 birth_date = coalesce(@birthDate::date, birth_date) WHERE id = @userId;
+                UPDATE client_profiles SET birth_year = extract(year FROM @birthDate::date)::int
+                WHERE @birthDate::date IS NOT NULL AND club_id = @ClubId AND user_id = @userId;
                 """,
                 new
                 {
-                    staff.ClubId, userId, now, displayName, groupId, note, phone, birthYear, r.Blacklisted, gender,
+                    staff.ClubId, userId, now, displayName, groupId, note, phone, birthYear, r.Blacklisted, gender, birthDate,
                     hasGroup = AdminInput.Has(body, "groupId"), hasNote = AdminInput.Has(body, "note"), hasPhone = AdminInput.Has(body, "phone"),
                     hasBirthYear = AdminInput.Has(body, "birthYear"),
                 },
                 tx);
             name = displayName ?? name;
+            if (birthDate is not null && birthDate != birthBefore)
+            {
+                // D-107: the date of birth decides the minors' curfew, so every change at the desk is in the journal.
+                await Audit.WriteAsync(c, tx, staff, now, "clientBirthDate", userId, detail: $"{name} · {birthBefore ?? "—"} → {birthDate}",
+                    meta: new { before = birthBefore, after = birthDate, clientName = name });
+            }
+
             var group = AdminInput.Has(body, "groupId") ? groupId : before.GroupId;
             if (group != before.GroupId)
             {
@@ -318,7 +345,7 @@ public static class ClientEndpoints
                 }
             }
 
-            client = await ViewAsync(c, tx, staff, userId);
+            client = await ViewAsync(c, tx, staff, userId, now);
             await tx.CommitAsync();
         }
 
@@ -345,7 +372,7 @@ public static class ClientEndpoints
         await CardFreeAsync(c, tx, staff, card, userId);
         await UniqueAsync(c, tx, () => c.ExecuteAsync("UPDATE users SET card_id = @card WHERE id = @userId", new { card, userId }, tx));
         await Audit.WriteAsync(c, tx, staff, now, "clientCard", userId, detail: $"{name} · {card ?? "—"}", meta: new { cardId = card });
-        var client = await ViewAsync(c, tx, staff, userId);
+        var client = await ViewAsync(c, tx, staff, userId, now);
         await tx.CommitAsync();
         return AdminJson.Ok(new AdminClientResponse(client));
     }
@@ -415,11 +442,23 @@ public static class ClientEndpoints
     }
 
     /// <summary>The client as the console draws it; the caller made sure it exists.</summary>
-    public static async Task<AdminClient> ViewAsync(NpgsqlConnection c, NpgsqlTransaction? tx, StaffContext staff, Guid id)
+    public static async Task<AdminClient> ViewAsync(NpgsqlConnection c, NpgsqlTransaction? tx, StaffContext staff, Guid id, DateTimeOffset now)
     {
         var club = await SessionService.ClubAsync(c, tx, staff.ClubId);
         var row = await c.QuerySingleAsync<ClientRow>($"{ClientRow.Select} AND u.id = @id", new { staff.ClubId, staff.NetworkId, id }, tx);
-        return row.ToWire(club.Pricing);
+        return row.ToWire(club.Pricing, now);
+    }
+
+    /// <summary>The age on the club's local date and whether it makes a minor (D-108); nulls without a date of birth.</summary>
+    private static (int? Age, bool? Minor) AgeOf(string? birthDate, ClubPricing club, DateTimeOffset now)
+    {
+        if (BirthDates.Parse(birthDate) is not { } birth)
+        {
+            return (null, null);
+        }
+
+        var age = BirthDates.Age(birth, BirthDates.Today(now, club.TimeZone));
+        return (age, age < club.MinorAge);
     }
 
     /// <summary>
@@ -472,7 +511,8 @@ public static class ClientEndpoints
         /// <summary>Clients of the network with this club's profile; <c>visits</c> = sessions in this club.</summary>
         public const string Select =
             """
-            SELECT u.id, u.username, u.display_name, u.role, u.card_id, u.gender, w.main_balance, w.bonus_balance, w.lifetime_spent,
+            SELECT u.id, u.username, u.display_name, u.role, u.card_id, u.gender, to_char(u.birth_date, 'YYYY-MM-DD') AS birth_date,
+                   w.main_balance, w.bonus_balance, w.lifetime_spent,
                    cp.group_id, coalesce(cp.note, '') AS note, coalesce(cp.blacklisted, false) AS blacklisted,
                    coalesce(cp.phone, '') AS phone, cp.birth_year,
                    (SELECT count(*) FROM sessions s WHERE s.user_id = u.id AND s.club_id = @ClubId)::int AS visits
@@ -496,15 +536,17 @@ public static class ClientEndpoints
         public bool Blacklisted { get; init; }
         public string Phone { get; init; } = "";
         public int? BirthYear { get; init; }
+        public string? BirthDate { get; init; }
         public int Visits { get; init; }
 
         /// <summary>The level reached by the lifetime spend; below the first one — the first (as the mock); no levels — 1, unnamed.</summary>
-        public AdminClient ToWire(ClubPricing club)
+        public AdminClient ToWire(ClubPricing club, DateTimeOffset now)
         {
             var level = club.LevelOf(LifetimeSpent) ?? club.Loyalty.FirstOrDefault();
+            var (age, minor) = AgeOf(BirthDate, club, now);
             return new AdminClient(
                 Id, Username, DisplayName, Role, Money.Uzs(MainBalance), Money.Uzs(BonusBalance), GroupId, Note, Blacklisted, Phone, BirthYear, CardId,
-                LifetimeSpent, Visits, level?.Level ?? 1, level?.Name ?? "", Gender);
+                LifetimeSpent, Visits, level?.Level ?? 1, level?.Name ?? "", Gender, BirthDate, age, minor);
         }
     }
 
@@ -516,7 +558,8 @@ public static class ClientEndpoints
         /// </summary>
         public const string Select =
             """
-            SELECT u.id, u.username, u.display_name, u.card_id, u.gender, w.main_balance, w.bonus_balance, coalesce(cp.phone, '') AS phone,
+            SELECT u.id, u.username, u.display_name, u.card_id, u.gender, to_char(u.birth_date, 'YYYY-MM-DD') AS birth_date,
+                   w.main_balance, w.bonus_balance, coalesce(cp.phone, '') AS phone,
                    coalesce(cp.blacklisted, false) AS blacklisted,
                    s.pc_id AS playing_pc_id, p.name AS playing_pc_name, greatest(u.last_seen_at, w.updated_at, u.created_at) AS active_at
             FROM users u
@@ -532,6 +575,7 @@ public static class ClientEndpoints
         public string DisplayName { get; init; } = "";
         public string? CardId { get; init; }
         public string? Gender { get; init; }
+        public string? BirthDate { get; init; }
         public long MainBalance { get; init; }
         public long BonusBalance { get; init; }
         public string Phone { get; init; } = "";
@@ -568,12 +612,12 @@ public static class ClientEndpoints
             return digits is not null && PhoneDigits.Contains(digits, StringComparison.Ordinal) ? 3 : -1;
         }
 
-        public AdminClientLookupItem ToWire()
+        public AdminClientLookupItem ToWire(ClubPricing club, DateTimeOffset now)
         {
             var phone = PhoneDigits;
             return new AdminClientLookupItem(
                 Id, DisplayName, Username, phone.Length == 0 ? null : phone[^Math.Min(4, phone.Length)..], Money.Uzs(MainBalance), Money.Uzs(BonusBalance), CardId,
-                PlayingPcId is { } pcId ? new AdminClientPlaying(pcId, PlayingPcName ?? "") : null, Blacklisted, Gender);
+                PlayingPcId is { } pcId ? new AdminClientPlaying(pcId, PlayingPcName ?? "") : null, Blacklisted, Gender, BirthDate, AgeOf(BirthDate, club, now).Minor);
         }
     }
 }

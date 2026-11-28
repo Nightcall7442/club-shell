@@ -444,23 +444,37 @@ public sealed class FolderRedirectSettings
 public sealed class SessionSettings
 {
     /// <summary>
-    /// Remaining-minute marks at which <c>session.warning</c> is emitted: from 15 minutes left every 3 minutes, and the last
-    /// minute. Read through <see cref="EffectiveWarningMinutes"/>.
+    /// Remaining-minute marks at which <c>session.warning</c> is emitted (D-109): by default 10, 7 and 5 minutes left. The
+    /// owner sets the club's own list in the admin console (<c>limits.warningMinutes</c>), which the server sends here
+    /// (<c>AgentServerConfig.session.warningMinutes</c>, without the last minute). The last minute is always warned too.
+    /// Read through <see cref="EffectiveWarningMinutes"/>.
     /// </summary>
     public int[] WarningMinutes { get; set; } = DefaultWarningMinutes.ToArray();
 
-    /// <summary>The shipped marks: 15, 12, 9, 6, 3 minutes left and the last minute.</summary>
-    public static readonly IReadOnlyList<int> DefaultWarningMinutes = [15, 12, 9, 6, 3, 1];
+    /// <summary>The shipped marks: 10, 7 and 5 minutes left (D-109).</summary>
+    public static readonly IReadOnlyList<int> DefaultWarningMinutes = [10, 7, 5];
 
-    /// <summary>The marks of releases before 1.0.25, copied into every PC's <c>agent.json</c> by the installer.</summary>
-    private static readonly int[] LegacyWarningMinutes = [10, 5, 1];
+    /// <summary>The final warning every session gets, whatever the club's list: the last minute.</summary>
+    public const int LastMinuteWarning = 1;
 
     /// <summary>
-    /// The marks in force: <see cref="WarningMinutes"/>, except the untouched old default <c>[10, 5, 1]</c> that every PC's
-    /// <c>agent.json</c> carries from its install, which means the current default.
+    /// The marks of earlier releases that the installer copied into every PC's <c>agent.json</c> (<c>[10, 5, 1]</c> before
+    /// 1.0.25, <c>[15, 12, 9, 6, 3, 1]</c> until D-109). The server never sends a list with the last minute in it, so these
+    /// can only come from an untouched file.
     /// </summary>
-    public int[] EffectiveWarningMinutes() =>
-        WarningMinutes is { } marks && !marks.SequenceEqual(LegacyWarningMinutes) ? marks : DefaultWarningMinutes.ToArray();
+    private static readonly int[][] LegacyWarningMinutes = [[10, 5, 1], [15, 12, 9, 6, 3, 1]];
+
+    /// <summary>
+    /// The marks in force, descending and distinct: <see cref="WarningMinutes"/> (an untouched legacy default means the
+    /// current default) and always the last minute.
+    /// </summary>
+    public int[] EffectiveWarningMinutes()
+    {
+        var marks = WarningMinutes is { } own && !Array.Exists(LegacyWarningMinutes, legacy => own.SequenceEqual(legacy))
+            ? own
+            : DefaultWarningMinutes.ToArray();
+        return [.. marks.Append(LastMinuteWarning).Where(m => m > 0).Distinct().OrderDescending()];
+    }
 
     /// <summary>Server heartbeat interval.</summary>
     [Range(5, 3600)]
@@ -519,6 +533,32 @@ public sealed class OfflineSettings
     /// <summary>Cached user TTL.</summary>
     [Range(1, 100000)]
     public int UserCacheTtlHours { get; set; } = 168;
+
+    /// <summary>
+    /// The minors' night curfew (D-108) as the club server sends it (<c>offline.minorCurfew</c>): enforced on an offline
+    /// purchase with the date of birth of the cached player. Off until the server says.
+    /// </summary>
+    [Required]
+    public MinorCurfewSettings MinorCurfew { get; set; } = new();
+}
+
+/// <summary><c>agent.json → offline.minorCurfew</c> (D-108): the forbidden hours of the PC's local clock.</summary>
+public sealed class MinorCurfewSettings
+{
+    /// <summary>The club's curfew is on.</summary>
+    public bool Enabled { get; set; }
+
+    /// <summary>A player younger than this is a minor.</summary>
+    [Range(0, 120)]
+    public int MinorAge { get; set; } = 18;
+
+    /// <summary>The forbidden hours start, <c>HH:mm</c>.</summary>
+    [RegularExpression(@"^\d{2}:\d{2}$")]
+    public string From { get; set; } = "22:00";
+
+    /// <summary>The forbidden hours end, <c>HH:mm</c>.</summary>
+    [RegularExpression(@"^\d{2}:\d{2}$")]
+    public string To { get; set; } = "06:00";
 }
 
 /// <summary><c>agent.json → games</c>.</summary>

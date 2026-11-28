@@ -775,6 +775,8 @@ export function publicUser(u: UserRecord): User {
     flags: u.flags,
     // D-106: the bonus account, play time only (beyond the contract).
     bonus: u.bonus,
+    // D-107: the date of birth (beyond the contract); null — not given yet, the Shell asks for it.
+    birthDate: u.birthDate ?? null,
   };
 }
 
@@ -926,7 +928,21 @@ interface ClubForShell {
     afterMinutes: number;
     items: { url: string; type: 'image' | 'video'; durationSec: number }[];
   };
-  limits?: { selfSignup?: boolean };
+  limits?: { selfSignup?: boolean; warningMinutes?: number[] | null };
+}
+
+/** The low-time marks without the owner's choice (D-109). */
+export const DEFAULT_WARNING_MINUTES = [10, 7, 5];
+
+/**
+ * `session.warningMinutes` of the PCs' config, as the server sends it (`ClubPricing.WarningMinutesOf`): the owner's
+ * marks, descending, distinct, 2..120 (the agent adds the last minute itself); unset — the default.
+ */
+export function warningMinutesOf(marks: unknown): number[] {
+  if (!Array.isArray(marks) || marks.some((m) => typeof m !== 'number' || !Number.isInteger(m))) {
+    return [...DEFAULT_WARNING_MINUTES];
+  }
+  return [...new Set(marks as number[])].filter((m) => m > 1 && m <= 120).sort((a, b) => b - a);
 }
 
 function clubDoc(): ClubForShell | null {
@@ -979,7 +995,7 @@ export function agentConfigFor(pc: PcRecord): AgentServerConfig {
     pcName: pc.name,
     zone: pc.zone,
     number: pc.number,
-    session: { warningMinutes: [15, 5, 1], heartbeatSec: 30, graceSec: 60 },
+    session: { warningMinutes: warningMinutesOf(clubDoc()?.limits?.warningMinutes), heartbeatSec: 30, graceSec: 60 },
     offline: { allowNewSessions: true, maxOfflineMinutes: 240 },
     games: {
       accountPool: { enabled: true, leaseTtlSec: 14400, releaseOnExit: true },
@@ -1232,6 +1248,8 @@ function seedUsers(t0: number): UserRecord[] {
     bonus: zero(),
     muted: false,
     transient: false,
+    // D-107: every account has its date of birth; the demo players are adults.
+    birthDate: '1998-04-12',
     ...extra,
   });
   return [

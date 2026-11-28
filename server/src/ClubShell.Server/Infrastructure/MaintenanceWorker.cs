@@ -49,7 +49,7 @@ public sealed class MaintenanceWorker(NpgsqlDataSource db, MaintenanceOptions op
             DELETE FROM staff_tokens WHERE expires_at < @now OR revoked_at < @now;
             DELETE FROM qr_logins WHERE expires_at < @tokens;
             DELETE FROM webhook_outbox WHERE sent_at < @outbox;
-            DELETE FROM rule_firings WHERE fired_at < @outbox;
+            DELETE FROM rule_firings WHERE fired_at < @outbox AND (rule_id <> 'birthdayGift' OR fired_at < @birthdays);
             UPDATE admin_calls SET status = 'resolved', resolved_at = @now, resolved_by_name = 'auto' WHERE status <> 'resolved' AND received_at < @calls;
             DELETE FROM admin_calls WHERE received_at < @events;
             DELETE FROM staff_login_failures WHERE at < @pinFailures;
@@ -68,6 +68,9 @@ public sealed class MaintenanceWorker(NpgsqlDataSource db, MaintenanceOptions op
                 metrics = now - TimeSpan.FromDays(options.MetricsRetentionDays),
                 events = now - TimeSpan.FromDays(options.TelemetryEventsRetentionDays),
                 outbox = now - TimeSpan.FromDays(options.OutboxRetentionDays),
+
+                // D-107: a birthday gift is once per birthday year, so its firing outlives the year it guards.
+                birthdays = now - TimeSpan.FromDays(400),
                 pinFailures = now - TimeSpan.FromSeconds(Math.Max(auth.PinWindowSec, auth.PinClubWindowSec)),
                 devices = now - TimeSpan.FromDays(auth.PinDeviceTrustDays),
             });

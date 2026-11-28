@@ -48,7 +48,8 @@ import {
   knownValues,
   genderOf,
 } from '../db.js';
-import { club } from '../club.js';
+import { club, profileOf } from '../club.js';
+import { birthDateOf, curfewHolds, curfewHours, curfewText, inCurfewHours } from '../minors.js';
 import { generateLogin, phoneDigits } from '../logins.js';
 import { endSession } from './session.js';
 
@@ -105,6 +106,9 @@ function authResponse(
   extra: { offlineHash?: string | null; endElsewhere?: boolean } = {},
 ): AuthResponse {
   if (user.flags.includes('banned')) throw errors.forbidden('banned');
+  // D-108: a minor whose date of birth is known stays off the PC in the forbidden hours.
+  if (curfewHolds(user) === 'minor' && inCurfewHours())
+    throw new ApiError('forbidden', curfewText(), { reason: 'ageRestricted', ...curfewHours() });
   const elsewhere = openSessionForUser(user.id);
   let handoff: string | null = null;
   if (elsewhere && elsewhere.pcId !== pc.id) {
@@ -382,6 +386,8 @@ export function authRoutes(app: FastifyInstance): void {
     if (password.length < 4 || password.length > 64)
       throw errors.validation('password', password.length < 4 ? 'min' : 'max');
     const gender = genderOf(b);
+    // D-107: and the date of birth.
+    const birthDate = birthDateOf(b);
     const rules = c.rulesText ?? { ru: '', uz: '', en: '' };
     if ([rules.ru, rules.uz, rules.en].some((r) => (r ?? '').trim()) && optBool(b, 'acceptRules') !== true) {
       throw errors.validation('acceptRules', 'required');
@@ -416,10 +422,19 @@ export function authRoutes(app: FastifyInstance): void {
       muted: false,
       transient: false,
       gender,
+      birthDate,
     };
+    if (curfewHolds(user) === 'minor' && inCurfewHours())
+      throw new ApiError('forbidden', curfewText(), { reason: 'ageRestricted', ...curfewHours() });
     db.users.push(user);
     const phone = phoneDigits(typed) ? typed : '';
-    c.clients[user.id] = { groupId: null, note: '', blacklisted: false, phone, birthYear: null };
+    c.clients[user.id] = {
+      groupId: null,
+      note: '',
+      blacklisted: false,
+      phone,
+      birthYear: Number(birthDate.slice(0, 4)),
+    };
     signups.set(pc.id, [...recent, at]);
     markDirty();
     return authResponse(user, pc, { offlineHash: offlineHash(user, password) });
@@ -456,6 +471,14 @@ export function authRoutes(app: FastifyInstance): void {
     const locale = optOneOf(b, 'locale', LOCALES);
     const pin = optStr(b, 'pin', 6);
     if (pin !== null && !/^\d{4,6}$/.test(pin)) throw errors.validation('pin', 'format');
+    // D-107: the player gives the date of birth once; then only the desk changes it.
+    const birthDate = b['birthDate'] === undefined || b['birthDate'] === null ? null : birthDateOf(b);
+    if (birthDate !== null && user.birthDate) throw errors.forbidden('birthDateLocked');
+    if (birthDate !== null) {
+      user.birthDate = birthDate;
+      const p = profileOf(user.id);
+      club().clients[user.id] = { ...p, birthYear: Number(birthDate.slice(0, 4)) };
+    }
     if (displayName !== null) user.displayName = displayName.trim();
     if (avatarUrl !== null) user.avatarUrl = avatarUrl.length > 0 ? avatarUrl : null;
     if (locale !== null) user.locale = locale;

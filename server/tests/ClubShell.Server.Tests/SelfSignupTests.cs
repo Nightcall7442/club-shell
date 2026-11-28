@@ -57,7 +57,7 @@ public sealed class SelfSignupTests(ServerFixture server) : LedgerCheckedTest(se
         foreach (var (username, reason) in new[] { ("ab", "min"), (new string('x', 33), "max"), ("tursunov.bobur", "taken") })
         {
             Assert.Equal(("username", reason), StaffAdminTests.Details(await ExpectAsync(Server, 400, HttpMethod.Post, "/clients", cashier,
-                new { gender = "male", username, displayName = "Кто-то" })));
+                new { gender = "male", birthDate = Players.AdultBirthDate, username, displayName = "Кто-то" })));
         }
     }
 
@@ -79,8 +79,8 @@ public sealed class SelfSignupTests(ServerFixture server) : LedgerCheckedTest(se
         Assert.Equal(version + 1, await Players.ScalarAsync<int>(Server, "SELECT config_version FROM clubs"));
         Assert.True(await ShellFlagAsync(agent));
 
-        // Another limit changed, the switch kept: the PCs' config does not move.
-        await ExpectAsync(Server, 200, HttpMethod.Patch, "/club", owner, new { limits = new { minorAge = 16, minorCurfew = "22:00", selfSignup = true } });
+        // Another limit changed, the switch kept: the PCs' config does not move (the curfew's limits would, D-108).
+        await ExpectAsync(Server, 200, HttpMethod.Patch, "/club", owner, new { limits = new { minorAge = 18, minorCurfew = "22:00", selfSignup = true, guestPostpaid = false } });
         Assert.Equal(version + 1, await Players.ScalarAsync<int>(Server, "SELECT config_version FROM clubs"));
         await ExpectAsync(Server, 200, HttpMethod.Patch, "/club", owner, new { limits = new { minorAge = 18, minorCurfew = "22:00" } });
         Assert.Equal(version + 2, await Players.ScalarAsync<int>(Server, "SELECT config_version FROM clubs"));
@@ -108,6 +108,7 @@ public sealed class SelfSignupTests(ServerFixture server) : LedgerCheckedTest(se
             "SELECT count(*)::int FROM audit_entries WHERE action = 'clientSelfSignup' AND user_id = @id AND pc_id = @PcId AND staff_id IS NULL", new { id, agent.PcId }));
 
         Assert.Equal("female", await Players.ScalarAsync<string>(Server, "SELECT gender FROM users WHERE id = @id", new { id }));
+        Assert.Equal(Players.AdultBirthDate, await Players.ScalarAsync<string>(Server, "SELECT to_char(birth_date, 'YYYY-MM-DD') FROM users WHERE id = @id", new { id }));
 
         // The token is a player's: the account is theirs on this PC; the password signs in again on another PC.
         agent.UserToken = auth.GetProperty("accessToken").GetString();
@@ -130,6 +131,12 @@ public sealed class SelfSignupTests(ServerFixture server) : LedgerCheckedTest(se
                      // D-104: the gender is required, male or female.
                      (Body(agent, "Кто", $"y-{tag}", gender: null), "gender", "required"),
                      (Body(agent, "Кто", $"y-{tag}", gender: "other"), "gender", "enum"),
+                     // D-107: the date of birth too, an age of 5–100 on the club's date.
+                     (Body(agent, "Кто", $"y-{tag}", birthDate: null), "birthDate", "required"),
+                     (Body(agent, "Кто", $"y-{tag}", birthDate: "17.05.1990"), "birthDate", "format"),
+                     (Body(agent, "Кто", $"y-{tag}", birthDate: "2999-01-01"), "birthDate", "future"),
+                     (Body(agent, "Кто", $"y-{tag}", birthDate: Server.Clock.GetUtcNow().AddYears(-2).ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture)), "birthDate", "min"),
+                     (Body(agent, "Кто", $"y-{tag}", birthDate: "1900-01-01"), "birthDate", "max"),
                  })
         {
             Assert.Equal((field, reason), Details(Expect(await agent.RawPostAsync(Register, body), 400)));
@@ -170,11 +177,12 @@ public sealed class SelfSignupTests(ServerFixture server) : LedgerCheckedTest(se
     }
 
     private static object Body(
-        TestAgent agent, string name, string? username = "auto", string password = Players.Password, bool acceptRules = true, string? gender = "female") => new
+        TestAgent agent, string name, string? username = "auto", string password = Players.Password, bool acceptRules = true, string? gender = "female",
+        string? birthDate = Players.AdultBirthDate) => new
     {
         pcId = agent.PcId, hwid = agent.Hwid, displayName = name,
         username = username == "auto" ? $"u-{Guid.NewGuid():N}"[..20] : username,
-        password, acceptRules, gender,
+        password, acceptRules, gender, birthDate,
     };
 
     private async Task<JsonElement> AddAsync(string cashier, object body) =>

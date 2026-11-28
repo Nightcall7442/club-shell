@@ -22,7 +22,7 @@ public sealed class GenderTests(ServerFixture server) : LedgerCheckedTest(server
         Assert.Equal(0, await Players.ScalarAsync<int>(Server, "SELECT count(*)::int FROM users WHERE username = @u", new { u = $"g0-{tag}" }));
 
         var made = (await ExpectAsync(Server, 200, HttpMethod.Post, "/clients", cashier,
-            new { displayName = "Мадина", username = $"g1-{tag}", gender = "female" })).GetProperty("client");
+            new { displayName = "Мадина", username = $"g1-{tag}", gender = "female", birthDate = Players.AdultBirthDate })).GetProperty("client");
         Assert.Equal("female", made.GetProperty("gender").GetString());
         var lookup = (await RawExpectAsync(Server, 200, HttpMethod.Get, $"/clients/lookup?q=g1-{tag}", cashier)).GetProperty("items")[0];
         Assert.Equal("female", lookup.GetProperty("gender").GetString());

@@ -1,6 +1,7 @@
 /**
  * «Создать аккаунт» on the lock screen (D-92), only where the owner allows it (`shell.club.selfSignup`): the player's
- * name, the gender (D-104: required, two big toggles, none picked at first), a login or a phone number to sign in with
+ * name, the gender (D-104: required, two big toggles, none picked at first), the date of birth (D-107: required, day,
+ * month and year pickers), a login or a phone number to sign in with
  * later, the password twice, and the club rules accepted when the club has any. On success the player is signed in, exactly as after a password login (the lock screen goes on to the
  * tariff picker). Every refusal of the server gets its own line on the field it is about.
  */
@@ -8,17 +9,27 @@ import { useMemo, useState, type FormEvent } from 'react';
 import clsx from 'clsx';
 import { useTranslation } from 'react-i18next';
 import type { ClubRules, Locale } from '@clubshell/contracts';
+import { BirthDatePicker, EMPTY_BIRTH_DATE, birthDateOf, type BirthDateParts } from '@/components/BirthDatePicker';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { clubRules } from '@/hooks/useClub';
 import { useLocale } from '@/hooks/useLocale';
+import { birthDateProblem, birthDateProblemOf, isoDay } from '@/lib/birthDate';
 import { errorDetails, errorReason } from '@/lib/errorText';
 import { toShellApiError } from '@/lib/tauri';
 import { useAuthStore } from '@/store/auth';
 import { describeError, useNotificationsStore } from '@/store/notifications';
 import { useSettingsStore } from '@/store/settings';
 
-type Field = 'displayName' | 'gender' | 'username' | 'password' | 'passwordAgain' | 'acceptRules' | 'form';
+type Field =
+  | 'displayName'
+  | 'gender'
+  | 'birthDate'
+  | 'username'
+  | 'password'
+  | 'passwordAgain'
+  | 'acceptRules'
+  | 'form';
 type Gender = 'male' | 'female';
 const GENDERS: readonly Gender[] = ['male', 'female'];
 type Errors = Partial<Record<Field, string>>;
@@ -50,6 +61,7 @@ export function RegisterForm({ onCancel, className }: RegisterFormProps): JSX.El
   const rules = useMemo(() => rulesToAccept(clubRulesText, locale), [clubRulesText, locale]);
   const [displayName, setDisplayName] = useState('');
   const [gender, setGender] = useState<Gender | null>(null);
+  const [birth, setBirth] = useState<BirthDateParts>(EMPTY_BIRTH_DATE);
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [again, setAgain] = useState('');
@@ -65,6 +77,9 @@ export function RegisterForm({ onCancel, className }: RegisterFormProps): JSX.El
     if (!name) next.displayName = t('lock.register.nameRequired');
     else if (name.length > NAME_MAX) next.displayName = t('lock.register.nameTooLong');
     if (!gender) next.gender = t('lock.register.genderRequired');
+    // D-107: the date of birth is required too.
+    const birthProblem = birthDateProblem(birthDateOf(birth), isoDay(new Date()));
+    if (birthProblem) next.birthDate = t(`birthDate.problem.${birthProblem}`);
     if (!login) next.username = t('lock.register.loginRequired');
     else if (login.length < LOGIN_MIN || login.length > LOGIN_MAX) next.username = t('lock.register.loginTooShort');
     if (password.length < PASSWORD_MIN) next.password = t('lock.register.passwordTooShort');
@@ -87,10 +102,13 @@ export function RegisterForm({ onCancel, className }: RegisterFormProps): JSX.El
         if (field === 'password') return { password: t('lock.register.passwordTooShort') };
         if (field === 'displayName') return { displayName: t('lock.register.nameRequired') };
         if (field === 'gender') return { gender: t('lock.register.genderRequired') };
+        if (field === 'birthDate') return { birthDate: t(`birthDate.problem.${birthDateProblemOf(reason)}`) };
         if (field === 'acceptRules') return { acceptRules: t('lock.register.rulesRequired') };
         break;
       case 'forbidden':
         if (reason === 'selfSignupDisabled') return { form: t('lock.register.disabled') };
+        // D-108: a minor registering in the forbidden hours.
+        if (reason === 'ageRestricted') return { form: describeError(e, 'login') };
         break;
       case 'rateLimited':
         return { form: t('lock.register.tooMany') };
@@ -117,6 +135,7 @@ export function RegisterForm({ onCancel, className }: RegisterFormProps): JSX.El
         password,
         acceptRules: rules ? accepted : null,
         gender,
+        birthDate: birthDateOf(birth),
       });
       push({
         id: 'self-signup',
@@ -188,6 +207,15 @@ export function RegisterForm({ onCancel, className }: RegisterFormProps): JSX.El
           </p>
         )}
       </div>
+      <BirthDatePicker
+        value={birth}
+        disabled={busy}
+        error={errors.birthDate}
+        onChange={(p) => {
+          setBirth(p);
+          setErrors((e) => ({ ...e, birthDate: undefined }));
+        }}
+      />
       <Input
         name="username"
         size="lg"

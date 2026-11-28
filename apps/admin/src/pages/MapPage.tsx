@@ -47,6 +47,7 @@ import {
   type SessionResult,
 } from '@/api';
 import { DEFAULT_WALLPAPER, GameArt } from '@/art';
+import { MinorBadge } from '@/birthDate';
 import { CallGroupActions, CallMark, groupCalls, groupLine, setCalls, useCalls, type CallGroup } from '@/calls';
 import { ClientPicker, pcLabel } from '@/clientSearch';
 import { useClub } from '@/club';
@@ -85,6 +86,13 @@ import {
 } from '@/paybox';
 import { guestSignIn, type ReceiptData } from '@/print';
 import { useShift } from '@/shift';
+
+/**
+ * The club's age of majority from the last overview (D-108, `Overview.minorAge`): the seat tile and card say «до 18» by
+ * it. One club per console, so a module value the map's poll keeps current is enough.
+ */
+let clubMinorAge = 18;
+const minorAgeOf = (): number => clubMinorAge;
 import { HallPlanView, ZoomControls, hasPlaces } from './mapPlan';
 import { QuickActions, type QuickAction, type QuickRequest } from './quickActions';
 import {
@@ -457,6 +465,7 @@ function SeatTile({
   // nobody has signed in the game stays only for a screen reader (the line has no room for both).
   const sub: { text: string; tone: 'warn' | 'accent' | 'plain' | 'hidden' }[] = [];
   if (call) sub.push({ text: t('Зовёт админа'), tone: 'warn' });
+  if (session && seat.user?.minor) sub.push({ text: t('до {n}', { n: minorAgeOf() }), tone: 'warn' });
   if (waiting) sub.push({ text: t('ждёт входа'), tone: 'accent' });
   if (game) sub.push({ text: game.title, tone: waiting ? 'hidden' : 'plain' });
   else if (session && !waiting && !call && (!prepaid || tariff))
@@ -2114,11 +2123,28 @@ function SeatPanel({
         </Button>
       </section>
     ) : null;
+  // D-108: the minors' night curfew on this seat — coming (the server ends the session then) or done.
+  const curfewBanner = seat.curfew ? (
+    <Note tone="warn" role="status">
+      <span data-curfew-note className="text-[12.5px]">
+        {seat.curfew.ended
+          ? t(
+              'Ночной запрет для несовершеннолетних: сеанс {name} завершён в {time}, неиспользованное время возвращено',
+              {
+                name: seat.curfew.userName,
+                time: clock(seat.curfew.at),
+              },
+            )
+          : t('Ночной запрет для несовершеннолетних: сеанс завершится в {time}', { time: clock(seat.curfew.at) })}
+      </span>
+    </Note>
+  ) : null;
   const banner =
-    callBanner || seat.kioskAlert || wakeBanner ? (
+    callBanner || seat.kioskAlert || wakeBanner || curfewBanner ? (
       <>
         {wakeBanner}
         {callBanner}
+        {curfewBanner}
         {seat.kioskAlert && (
           <Note tone="warn" role="status">
             {t(KIOSK_ALERT[seat.kioskAlert].text)}
@@ -2374,6 +2400,16 @@ function BusySeat({
 
       <div className="flex flex-col gap-3 px-4 pb-4 pt-3.5">
         {banner}
+        {(user.minor || user.noBirthDate) && (
+          <div className="flex flex-wrap gap-1.5">
+            {user.minor && <MinorBadge minorAge={minorAgeOf()} />}
+            {user.noBirthDate && (
+              <Badge tone="warn" title={t('Без даты рождения ночью играть нельзя: укажите её в карточке клиента')}>
+                <span data-no-birth-date>{t('Нет даты рождения')}</span>
+              </Badge>
+            )}
+          </div>
+        )}
         {seat.signedIn === false && (
           <Note tone="warn" className="text-[12.5px]">
             {t('На ПК ещё никто не вошёл, а время уже идёт')}
@@ -4073,6 +4109,7 @@ export function MapPage(): JSX.Element {
   const load = useCallback(async () => {
     try {
       const o = await adminApi.overview();
+      if (typeof o.minorAge === 'number') clubMinorAge = o.minorAge;
       setData(o);
       // The map polls faster than the top bar: the calls ring and stop sooner here.
       setCalls(o.calls);

@@ -432,6 +432,10 @@ fn validate_profile_patch(mut patch: ProfileUpdateRequest) -> CmdResult<ProfileU
     if let Some(pin) = patch.pin.as_deref() {
         validate::pin("pin", pin)?;
     }
+    // D-107: the player gives a missing date of birth once (the server refuses a second one).
+    if let Some(date) = patch.birth_date.take() {
+        patch.birth_date = Some(validate::birth_date("birthDate", &date)?);
+    }
     Ok(patch)
 }
 
@@ -534,5 +538,20 @@ mod tests {
             ..Default::default()
         })
         .is_ok());
+        assert!(validate_profile_patch(ProfileUpdateRequest {
+            birth_date: Some("2010-13-01".into()),
+            ..Default::default()
+        })
+        .is_err());
+        assert_eq!(
+            validate_profile_patch(ProfileUpdateRequest {
+                birth_date: Some("2010-03-01".into()),
+                ..Default::default()
+            })
+            .unwrap()
+            .birth_date
+            .as_deref(),
+            Some("2010-03-01")
+        );
     }
 }

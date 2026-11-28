@@ -102,6 +102,7 @@ import type {
   ShellConfig,
 } from '@/lib/tauri';
 import { lookFromBranding } from '@/lib/look';
+import { rearmWarnings, startWarnings, stepMoneyWarnings, stepWarnings, warningMarks } from '@/lib/lowTime';
 import { builtinThemes, DEFAULT_THEME } from '@/theme/themes';
 import {
   ACHIEVEMENTS,
@@ -411,11 +412,70 @@ function persistAuth(username: string | null): void {
   }
 }
 
+/** `YYYY-MM-DD` of a local date. */
+function isoDay(d: Date): string {
+  const p = (n: number): string => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+
+/**
+ * `?birth=none` in the URL: the signed-in member has no date of birth yet (D-107: the Shell asks for it before time is
+ * bought); `?birth=minor` — a 14-year-old (D-108).
+ */
+function withBirth(user: User): User {
+  if (typeof window === 'undefined' || user.role === 'guest') return user;
+  const raw = new URLSearchParams(window.location.search).get('birth');
+  if (raw === 'none') return { ...user, birthDate: null };
+  if (raw === 'minor') {
+    const d = new Date();
+    return { ...user, birthDate: isoDay(new Date(d.getFullYear() - 14, d.getMonth(), d.getDate() - 1)) };
+  }
+  return user;
+}
+
+/**
+ * `?curfew=now` in the URL: the minors' forbidden hours are on now (D-108), as the server would refuse; `?curfew=soon` —
+ * they start in 30 minutes, so a longer purchase is refused with what still fits.
+ */
+function curfewMode(): 'now' | 'soon' | null {
+  const raw = typeof window === 'undefined' ? null : new URLSearchParams(window.location.search).get('curfew');
+  return raw === 'now' || raw === 'soon' ? raw : null;
+}
+
+/** The server's rule 5 (D-107/D-108) for the player's own purchase of `minutes` on top of `leftSec`. */
+function checkCurfew(user: User, minutes: number | null, leftSec = 0): void {
+  if (user.role === 'guest') return;
+  if (!user.birthDate) {
+    mockError('policyDenied', 'Укажите дату рождения', { rule: 'birthDateRequired', reason: 'birthDateRequired' });
+  }
+  const d = new Date();
+  const [y, m, day] = user.birthDate.split('-').map(Number) as [number, number, number];
+  const age = d.getFullYear() - y - (d.getMonth() + 1 < m || (d.getMonth() + 1 === m && d.getDate() < day) ? 1 : 0);
+  if (age >= 18) return;
+  const mode = curfewMode();
+  const hours = { from: '22:00', to: '06:00' };
+  if (mode === 'now') {
+    mockError('policyDenied', 'Несовершеннолетним нельзя играть с 22:00 до 06:00', {
+      rule: 'minorCurfew',
+      reason: 'minorCurfew',
+      ...hours,
+    });
+  }
+  if (mode === 'soon' && minutes !== null && leftSec / 60 + minutes > 30) {
+    mockError('validation', 'Несовершеннолетним нельзя играть с 22:00 до 06:00', {
+      field: 'minutes',
+      reason: 'curfew',
+      maxMinutes: Math.max(0, 30 - Math.ceil(leftSec / 60)),
+      ...hours,
+    });
+  }
+}
+
 function setUser(user: User): void {
   if (mockState.user && mockState.user.id !== user.id) {
     leaveAccount();
   }
-  mockState.user = clone(user);
+  mockState.user = clone(withBirth(user));
   mockState.expiresAt = isoIn(3600);
   mockState.balance = balanceFor(mockState.user);
   // The server sends the bonus account with the player (D-106).
@@ -631,7 +691,25 @@ function assertFunds(required: Money, forTime = false): void {
 // Session engine
 // ---------------------------------------------------------------------------------------------------------------------
 
-const WARNING_MARKS = [15, 5, 1] as const;
+/**
+ * The club's low-time marks (D-109) as the Agent has them from the server config: 10, 7, 5 and the last minute unless a
+ * test sets its own (`simulate.warningMinutes`).
+ */
+let warningMinutes: number[] | null = null;
+
+/** As the Agent and the server: one `session.warning`, and, while a game runs, the native overlay's toast (Rust side). */
+function emitWarning(s: Session, minutesLeft: number): void {
+  const warning = {
+    sessionId: s.id,
+    minutesLeft,
+    secondsLeft: s.secondsLeft >= 0 ? s.secondsLeft : minutesLeft * 60,
+    endsAt: s.endsAt,
+  };
+  emitMock('agent://session.warning', warning);
+  if (minutesLeft > 0 && (mockState.kiosk.gameMode || mockState.running.length > 0) && !mockState.lockedByStaff) {
+    emitMock('kiosk://overlay', { kind: 'message', payload: warning });
+  }
+}
 
 function emitSession(): void {
   // Nobody signed in (a session kept after the token ran out): nothing to tell the lock screen.
@@ -694,16 +772,10 @@ function tick(): void {
     if (s.secondsLeft > 0) {
       s.secondsLeft -= 1;
       s.endsAt = isoIn(s.secondsLeft);
-      for (const m of WARNING_MARKS) {
-        if (s.secondsLeft === m * 60 && !s.warningsSent.includes(m)) {
-          s.warningsSent.push(m);
-          emitMock('agent://session.warning', {
-            sessionId: s.id,
-            minutesLeft: m,
-            secondsLeft: s.secondsLeft,
-            endsAt: s.endsAt,
-          });
-        }
+      const step = stepWarnings(warningMarks(warningMinutes), s.warningsSent, s.secondsLeft);
+      s.warningsSent = step.sent;
+      if (step.warn !== null) {
+        emitWarning(s, step.warn);
       }
       if (s.secondsLeft === 0) {
         emitMock('agent://session.warning', { sessionId: s.id, minutesLeft: 0, secondsLeft: 0, endsAt: s.endsAt });
@@ -714,6 +786,22 @@ function tick(): void {
       const tariff = TARIFFS.find((t) => t.id === s.tariffId);
       if (tariff) {
         s.cost = tariffPriceFor(tariff, Math.ceil(s.secondsUsed / 60));
+        // The member's own pay as you go is capped by the money (balance + bonuses, D-106): the server warns when it
+        // pays for 10, 7, 5 and 1 more minutes (D-109). A desk's postpaid seat here has no cap.
+        if (!s.payAtDesk && mockState.user) {
+          const available = mockState.user.balance.amount + Math.max(0, mockState.balance.bonus.amount);
+          const step = stepMoneyWarnings(
+            warningMarks(warningMinutes),
+            s.warningsSent,
+            available,
+            s.secondsUsed,
+            (seconds) => tariffPriceFor(tariff, Math.ceil(seconds / 60)).amount,
+          );
+          s.warningsSent = step.sent;
+          if (step.warn !== null) {
+            emitWarning(s, step.warn);
+          }
+        }
       }
     }
     emitSession();
@@ -1100,6 +1188,24 @@ export const simulate = {
     else delete club.screensaver;
     mockState.settings = { ...mockState.settings, club };
   },
+  /**
+   * The prepaid time left jumps to `seconds` (tests of the low-time warnings, D-109): marks above it re-arm, marks it is
+   * already past count as sent, and the next ticks warn as the Agent would.
+   */
+  timeLeft(seconds: number): void {
+    const s = mockState.session;
+    if (!s || s.secondsLeft < 0) {
+      return;
+    }
+    s.secondsLeft = seconds;
+    s.endsAt = isoIn(seconds);
+    s.warningsSent = startWarnings(warningMarks(warningMinutes), seconds + 1, rearmWarnings(s.warningsSent, seconds));
+    emitSession();
+  },
+  /** The club's own low-time marks (`limits.warningMinutes`), as the next config would bring them; null — 10, 7, 5. */
+  warningMinutes(marks: number[] | null): void {
+    warningMinutes = marks;
+  },
   /** The cash desk's postpaid: the session runs open-ended, paid at the desk when it ends. */
   postpaidSession(): void {
     if (mockState.session) {
@@ -1399,6 +1505,17 @@ cmd('auth_register', (args): AuthLoginResponse => {
   if (req.gender !== 'male' && req.gender !== 'female') {
     mockError('validation', 'gender is required', { field: 'gender', reason: req.gender ? 'enum' : 'required' });
   }
+  // D-107: and the date of birth.
+  const birthDate = (req.birthDate ?? '').trim();
+  if (!birthDate) {
+    mockError('validation', 'birthDate is required', { field: 'birthDate', reason: 'required' });
+  }
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(birthDate)) {
+    mockError('validation', 'birthDate format', { field: 'birthDate', reason: 'format' });
+  }
+  if (birthDate > isoDay(new Date())) {
+    mockError('validation', 'birthDate in the future', { field: 'birthDate', reason: 'future' });
+  }
   const hasRules = [club.rules?.ru, club.rules?.uz, club.rules?.en].some((r) => (r ?? '').trim().length > 0);
   if (hasRules && req.acceptRules !== true) {
     mockError('validation', 'the club rules are not accepted', { field: 'acceptRules', reason: 'required' });
@@ -1423,13 +1540,20 @@ cmd('auth_register', (args): AuthLoginResponse => {
     lastSeenAt: nowIso(),
     flags: [],
     bonus: money(0),
+    birthDate,
   };
   registeredAccounts.set(username, { user, password });
   setUser(user);
   // A new account starts with nothing, bonus included.
   mockState.balance = { ...mockState.balance, bonus: money(0) };
   mockState.session = null;
-  return { user: clone(user), session: null, expiresAt: mockState.expiresAt ?? isoIn(3600), mode: 'online' };
+  // The account as signed in (`?birth=` may have replaced its date of birth).
+  return {
+    user: clone(mockState.user ?? user),
+    session: null,
+    expiresAt: mockState.expiresAt ?? isoIn(3600),
+    mode: 'online',
+  };
 });
 
 /** As the Agent: a player's own postpaid session is paid and ended at the cash desk (`forbidden {reason: payAtDesk}`). */
@@ -1539,6 +1663,7 @@ cmd('session_start', (args): Session => {
   if (tariff.isPackage) {
     minutes = tariff.packageMinutes ?? 0;
   }
+  checkCurfew(user, req.prepaid ? minutes : null);
   if (req.prepaid) {
     if (minutes === null || minutes <= 0) {
       mockError('validation', 'minutes is required for prepaid sessions', { field: 'minutes', reason: 'required' });
@@ -1618,6 +1743,12 @@ cmd('session_extend', (args): Session => {
     mockError('validation', 'minutes must be a positive integer', { field: 'minutes', reason: 'min' });
   }
   const tariff = tariffById(str(args, 'tariffId') ?? s.tariffId);
+  if (mockState.user)
+    checkCurfew(
+      mockState.user,
+      tariff.isPackage ? (tariff.packageMinutes ?? minutes) : minutes,
+      Math.max(0, s.secondsLeft),
+    );
   // As the server: the quote's price — and on a package tariff, the whole package (why the shell hides "+30" there).
   const price = quoteFor(tariff, minutes, mockState.user).total;
   if (s.isPrepaid) {
@@ -1626,7 +1757,7 @@ cmd('session_extend', (args): Session => {
     s.cost = money(s.cost.amount + price.amount);
     s.secondsLeft += minutes * 60;
     s.endsAt = isoIn(s.secondsLeft);
-    s.warningsSent = s.warningsSent.filter((m) => m * 60 > s.secondsLeft);
+    s.warningsSent = rearmWarnings(s.warningsSent, s.secondsLeft);
   }
   emitSession();
   return clone(s);
@@ -2373,6 +2504,19 @@ cmd('profile_update', (args): User => {
   }
   if (patch.pin !== undefined && patch.pin !== null && !/^\d{4,6}$/.test(patch.pin)) {
     mockError('validation', 'pin must be 4–6 digits', { field: 'pin', reason: 'format' });
+  }
+  // D-107: the player gives the date of birth once; then only the desk changes it.
+  if (patch.birthDate !== undefined && patch.birthDate !== null) {
+    if (user.birthDate) {
+      mockError('forbidden', 'Only the club desk changes the date of birth', { reason: 'birthDateLocked' });
+    }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(patch.birthDate)) {
+      mockError('validation', 'birthDate format', { field: 'birthDate', reason: 'format' });
+    }
+    if (patch.birthDate > isoDay(new Date())) {
+      mockError('validation', 'birthDate in the future', { field: 'birthDate', reason: 'future' });
+    }
+    user.birthDate = patch.birthDate;
   }
   return clone(user);
 });

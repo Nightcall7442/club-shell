@@ -72,6 +72,7 @@ public static class UserFlags
 /// <param name="Locale">Preferred locale.</param>
 /// <param name="Flags">Free-form server flags (<see cref="UserFlags"/>); empty allowed.</param>
 /// <param name="Bonus">Bonus balance (D-106): spent only on play time, never in the bar or as cash; null from a server without the bonus account.</param>
+/// <param name="BirthDate">Date of birth, <c>YYYY-MM-DD</c> (D-107); null — not given yet (the Shell asks for it before time is bought).</param>
 public sealed record User(
     Guid Id,
     string Username,
@@ -85,7 +86,8 @@ public sealed record User(
     DateTimeOffset? LastSeenAt,
     Locale Locale,
     IReadOnlyList<string> Flags,
-    Money? Bonus = null)
+    Money? Bonus = null,
+    string? BirthDate = null)
 {
     /// <summary><see langword="true"/> when <paramref name="flag"/> is present (ordinal comparison).</summary>
     public bool HasFlag(string flag) => Flags.Contains(flag, StringComparer.Ordinal);
@@ -120,11 +122,13 @@ public static class AvatarUrls
 /// <param name="AvatarUrl">New avatar URL.</param>
 /// <param name="Locale">New locale.</param>
 /// <param name="Pin">New 4–6 digit PIN used by <c>session.unlock</c>.</param>
+/// <param name="BirthDate">The player's date of birth, <c>YYYY-MM-DD</c> (D-107): accepted only while the account has none; once set only the club's desk changes it.</param>
 public sealed record ProfileUpdateRequest(
     string? DisplayName = null,
     string? AvatarUrl = null,
     Locale? Locale = null,
-    string? Pin = null);
+    string? Pin = null,
+    string? BirthDate = null);
 
 /// <summary>
 /// Body of <c>POST /users/{userId}/pin/verify</c>: checks the player's unlock PIN against the one stored on the server

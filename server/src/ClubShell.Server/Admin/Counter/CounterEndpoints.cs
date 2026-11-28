@@ -79,10 +79,38 @@ public static partial class CounterEndpoints
         await using var c = await db.OpenConnectionAsync();
         var open = (await c.QueryAsync<SessionRow>($"SELECT {SessionRow.Columns} FROM sessions WHERE club_id = @ClubId AND state <> 'ended'", new { staff.ClubId }))
             .ToDictionary(s => s.PcId);
-        var players = (await c.QueryAsync<(Guid Id, string DisplayName, string Role, long Balance, long Bonus)>(
-                "SELECT u.id, u.display_name, u.role, w.main_balance, w.bonus_balance FROM users u JOIN wallets w ON w.user_id = u.id WHERE u.id = ANY(@ids)",
+        // D-108: «до 18» and «дата рождения не указана» on the seat, and the curfew note of the seat.
+        var pricing = (await SessionService.ClubAsync(c, null, staff.ClubId)).Pricing;
+        var holds = new Dictionary<Guid, string>();
+        var players = (await c.QueryAsync<(Guid Id, string DisplayName, string Role, long Balance, long Bonus, string? BirthDate)>(
+                """
+                SELECT u.id, u.display_name, u.role, w.main_balance, w.bonus_balance, to_char(u.birth_date, 'YYYY-MM-DD')
+                FROM users u JOIN wallets w ON w.user_id = u.id WHERE u.id = ANY(@ids)
+                """,
                 new { ids = open.Values.Select(s => s.UserId).ToArray() }))
-            .ToDictionary(u => u.Id, u => new AdminSeatUser(u.Id, u.DisplayName, u.Role, Money.Uzs(u.Balance), Money.Uzs(u.Bonus)));
+            .ToDictionary(u => u.Id, u =>
+            {
+                var birth = Users.BirthDates.Parse(u.BirthDate);
+                var minor = birth is { } b && u.Role is "member" or "vip" && Users.BirthDates.Age(b, Users.BirthDates.Today(now, pricing.TimeZone)) < pricing.MinorAge;
+                var unknown = birth is null && u.Role is "member" or "vip";
+                if (pricing.CurfewHolds(u.Role, birth, now) is { } hold)
+                {
+                    holds[u.Id] = hold;
+                }
+
+                return new AdminSeatUser(u.Id, u.DisplayName, u.Role, Money.Uzs(u.Balance), Money.Uzs(u.Bonus), minor ? true : null, unknown ? true : null);
+            });
+        var nextCurfew = pricing.NextCurfewStart(now);
+        var curfewEnded = (await c.QueryAsync<(Guid PcId, DateTimeOffset At, string Name)>(
+            """
+            SELECT DISTINCT ON (s.pc_id) s.pc_id, s.ended_at, u.display_name
+            FROM sessions s JOIN users u ON u.id = s.user_id
+            WHERE s.club_id = @ClubId AND s.state = 'ended' AND s.ended_at > @since
+              AND EXISTS (SELECT 1 FROM session_events e WHERE e.session_id = s.id AND e.source = 'server' AND e.type = 'curfewEnd')
+            ORDER BY s.pc_id, s.ended_at DESC
+            """,
+            new { staff.ClubId, since = now - TimeSpan.FromMinutes(30) }))
+            .ToDictionary(e => e.PcId, e => new AdminSeatCurfew(e.At, true, e.Name));
 
         // D-49: a desk session nobody has signed in to yet («ждёт входа»; its clock already runs).
         var signedIn = (await c.QueryAsync<Guid>(
@@ -124,6 +152,11 @@ public static partial class CounterEndpoints
         {
             var status = pc.Status(hub.IsConnected(pc.Id), now, TimeSpan.FromSeconds(agents.OfflineAfterSec));
             var s = open.GetValueOrDefault(pc.Id);
+
+            // An open session the curfew ends within the hour, else the one it ended here in the last 30 minutes.
+            var curfew = s is not null && holds.ContainsKey(s.UserId) && nextCurfew is { } at && at - now <= TimeSpan.FromHours(1)
+                ? new AdminSeatCurfew(at, false, players.GetValueOrDefault(s.UserId)?.DisplayName ?? "")
+                : s is null ? curfewEnded.GetValueOrDefault(pc.Id) : null;
             return new AdminSeat(
                 pc.ToPc(status, withHwid: false),
                 s?.ToWire(now),
@@ -131,7 +164,8 @@ public static partial class CounterEndpoints
                 s is null ? null : signedIn.Contains(pc.Id),
                 s is not null && status is Contracts.Pcs.PcStatus.Busy or Contracts.Pcs.PcStatus.Locked ? games.GetValueOrDefault(pc.Id) : null,
                 status == Contracts.Pcs.PcStatus.Offline ? null : kioskAlerts.GetValueOrDefault(pc.Id),
-                new HallPlace(pc.X, pc.Y, pc.Rotation));
+                new HallPlace(pc.X, pc.Y, pc.Rotation),
+                curfew);
         }).ToList();
         var tariffs = (await c.QueryAsync<TariffRow>(
             $"SELECT {TariffRow.Columns} FROM tariffs WHERE club_id = @ClubId AND deleted_at IS NULL ORDER BY created_at, id", new { staff.ClubId }))
@@ -190,7 +224,7 @@ public static partial class CounterEndpoints
         return AdminJson.Ok(new AdminOverview(
             now, new AdminOccupancy(seats.Count(s => s.Pc.Status == Contracts.Pcs.PcStatus.Free), seats.Count), seats, tariffs, members,
             await ZonesAsync(c, staff.ClubId), repairs, debts, refunds, await AdminCalls.LiveAsync(c, staff.ClubId, now),
-            await HallLayout.PlanAsync(c, staff.ClubId)));
+            await HallLayout.PlanAsync(c, staff.ClubId), pricing.MinorAge));
     }
 
     /// <summary>

@@ -196,8 +196,8 @@ public sealed class PlayerAuthTests(LongClockServerFixture server) : LedgerCheck
         Assert.Equal(("forbidden", "banned"), await RefusedAsync(agent, blacklisted, 403));
 
         var minor = await Players.CreateAsync(Server);
-        await Players.ProfileAsync(Server, minor, birthYear: Server.Clock.GetUtcNow().Year - 12);
-        await Players.ExecuteAsync(Server, """UPDATE clubs SET settings = settings || '{"limits":{"minorAge":18,"minorCurfew":"00:00"}}'::jsonb""");
+        await Players.BirthDateAsync(Server, minor, Players.BornYearsAgo(Server, 12));
+        await Players.CurfewAsync(Server);
         try
         {
             Assert.Equal(("forbidden", "ageRestricted"), await RefusedAsync(agent, minor, 403));

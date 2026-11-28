@@ -75,8 +75,12 @@ public sealed record AdminShiftCloseResponse(AdminShift Shift, long ExpectedCash
 
 public sealed record AdminZone(string Name, string Color);
 
-/// <summary><c>bonus</c> (beyond the contract, D-106): the bonus account, play time only.</summary>
-public sealed record AdminSeatUser(Guid Id, string DisplayName, string Role, Money Balance, Money Bonus);
+/// <summary>
+/// <c>bonus</c> (beyond the contract, D-106): the bonus account, play time only. <c>minor</c> (beyond the contract, D-108):
+/// true — a minor by the club's <c>limits.minorAge</c> (the desk's «до 18»); <c>noBirthDate</c>: true — a member whose date
+/// of birth is not known (D-107); both null otherwise.
+/// </summary>
+public sealed record AdminSeatUser(Guid Id, string DisplayName, string Role, Money Balance, Money Bonus, bool? Minor = null, bool? NoBirthDate = null);
 
 /// <summary><c>bonus</c> (beyond the contract, D-106): the bonus account, play time only.</summary>
 public sealed record AdminMember(Guid Id, string DisplayName, string Role, Money Balance, string Username, Money Bonus);
@@ -86,21 +90,30 @@ public sealed record AdminMember(Guid Id, string DisplayName, string Role, Money
 /// <c>game</c> (beyond the contract, D-71): the game the PC's agent reports running for this session, from its last
 /// heartbeat; null — none, no session, or the PC is not busy or locked. <c>kioskAlert</c> (beyond the contract,
 /// SHELL_CHANGES 76–77): as on <see cref="AdminHallPc"/>, of a PC that is not offline. <c>place</c> (beyond the contract,
-/// SHELL_CHANGES 94): where the PC stands on the hall plan.
+/// SHELL_CHANGES 94): where the PC stands on the hall plan. <c>curfew</c> (beyond the contract, D-108): the minors' night
+/// curfew on this seat — the open session of a minor that the server ends at <c>at</c>, or the one it ended at <c>at</c>
+/// (in the last 30 minutes, <c>ended</c> true); null — nothing to say.
 /// </summary>
 public sealed record AdminSeat(
-    Pc Pc, Session? Session, AdminSeatUser? User, bool? SignedIn = null, AdminSeatGame? Game = null, string? KioskAlert = null, HallPlace? Place = null);
+    Pc Pc, Session? Session, AdminSeatUser? User, bool? SignedIn = null, AdminSeatGame? Game = null, string? KioskAlert = null, HallPlace? Place = null,
+    AdminSeatCurfew? Curfew = null);
+
+/// <summary>The seat's curfew note (D-108): when, whose and whether the session already ended.</summary>
+public sealed record AdminSeatCurfew(DateTimeOffset At, bool Ended, string UserName);
 
 /// <summary>A running game on the map (D-71): the catalog title and art; an empty <c>coverUrl</c> is null.</summary>
 public sealed record AdminSeatGame(Guid Id, string Title, string? CoverUrl, string? HeroUrl);
 
 public sealed record AdminOccupancy(int Free, int Total);
 
-/// <summary><c>calls</c> (beyond the contract, D-63): the admin calls open or acknowledged in the last 12 h, newest first.</summary>
+/// <summary>
+/// <c>calls</c> (beyond the contract, D-63): the admin calls open or acknowledged in the last 12 h, newest first.
+/// <c>minorAge</c> (beyond the contract, D-108): the club's <c>limits.minorAge</c>, for the seat's «до 18».
+/// </summary>
 public sealed record AdminOverview(
     DateTimeOffset At, AdminOccupancy Club, IReadOnlyList<AdminSeat> Seats, IReadOnlyList<Tariff> Tariffs, IReadOnlyList<AdminMember> Users,
     IReadOnlyList<AdminZone> Zones, IReadOnlyList<object> Repairs, IReadOnlyList<AdminGuestDebt> GuestDebts, IReadOnlyList<AdminGuestRefund> GuestRefunds,
-    IReadOnlyList<AdminCall>? Calls = null, HallPlan? HallPlan = null);
+    IReadOnlyList<AdminCall>? Calls = null, HallPlan? HallPlan = null, int? MinorAge = null);
 
 /// <summary>
 /// An unpaid postpaid bill (beyond the contract): a guest's (<c>limits.guestPostpaid</c>) or a member's
@@ -283,21 +296,25 @@ public sealed record AdminStaffCreateResponse(string Id);
 /// <summary>
 /// <c>AdminClient</c>: the user, the club profile and loyalty; <c>bonus</c> is always 0 (D-9), <c>telegram</c> is never sent.
 /// <c>gender</c> (beyond the contract, D-104): <c>male | female</c>, null — not given (an account made before).
+/// <c>birthDate</c>, <c>age</c>, <c>minor</c> (beyond the contract, D-107/D-108): the date of birth (<c>YYYY-MM-DD</c>), the
+/// age on the club's local date and whether the club's <c>limits.minorAge</c> makes the client a minor; all null — not given.
 /// </summary>
 public sealed record AdminClient(
     Guid Id, string Username, string DisplayName, string Role, Money Balance, Money Bonus, string? GroupId, string Note, bool Blacklisted,
-    string Phone, int? BirthYear, string? CardId, long Spent, int Visits, int Level, string LevelName, string? Gender = null);
+    string Phone, int? BirthYear, string? CardId, long Spent, int Visits, int Level, string LevelName, string? Gender = null,
+    string? BirthDate = null, int? Age = null, bool? Minor = null);
 
 public sealed record AdminClientList(IReadOnlyList<AdminClient> Items);
 
 /// <summary>
 /// A client in the counter's picker (<c>GET /admin/clients/lookup</c>, beyond the contract): <c>phoneTail</c> — the last 4
 /// digits of the club's phone (null — no phone), <c>playing</c> — the PC of the client's open session in this club,
-/// <c>blacklisted</c> — the desk greys the client out (the club refuses them a session).
+/// <c>blacklisted</c> — the desk greys the client out (the club refuses them a session); <c>birthDate</c>/<c>minor</c> as on
+/// <see cref="AdminClient"/> (D-107/D-108).
 /// </summary>
 public sealed record AdminClientLookupItem(
     Guid Id, string DisplayName, string Username, string? PhoneTail, Money Balance, Money Bonus, string? CardId, AdminClientPlaying? Playing,
-    bool Blacklisted, string? Gender = null);
+    bool Blacklisted, string? Gender = null, string? BirthDate = null, bool? Minor = null);
 
 public sealed record AdminClientPlaying(Guid PcId, string PcName);
 
@@ -324,14 +341,20 @@ public sealed record AdminStaffUpdateRequest(string? Name, bool? Active, string?
 
 /// <summary>
 /// <c>telegram</c> is prohibited: not a member, so the binder skips it (accepted and ignored). <c>gender</c> (beyond the
-/// contract, D-104): required, <c>male | female</c>.
+/// contract, D-104): required, <c>male | female</c>. <c>birthDate</c> (beyond the contract, D-107): required,
+/// <c>YYYY-MM-DD</c>, an age of 5–100; it sets <c>birthYear</c> too.
 /// </summary>
 public sealed record AdminClientCreateRequest(
-    string? DisplayName, string? Username, string? Phone, int? BirthYear, string? GroupId, string? Password, string? CardId, string? Gender = null);
+    string? DisplayName, string? Username, string? Phone, int? BirthYear, string? GroupId, string? Password, string? CardId, string? Gender = null,
+    string? BirthDate = null);
 
-/// <summary><c>gender</c> (beyond the contract, D-104): <c>male | female</c> when present; it is never cleared.</summary>
+/// <summary>
+/// <c>gender</c> (beyond the contract, D-104): <c>male | female</c> when present; it is never cleared. <c>birthDate</c> (D-107):
+/// as at creation when present, never cleared, journaled (<c>clientBirthDate</c>).
+/// </summary>
 public sealed record AdminClientUpdateRequest(
-    string? DisplayName, string? GroupId, string? Note, string? Phone, int? BirthYear, bool? Blacklisted, string? Gender = null);
+    string? DisplayName, string? GroupId, string? Note, string? Phone, int? BirthYear, bool? Blacklisted, string? Gender = null,
+    string? BirthDate = null);
 
 public sealed record AdminClientCardRequest(string? CardId);
 
