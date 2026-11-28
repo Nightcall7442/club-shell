@@ -377,6 +377,12 @@ export interface ClubConfig {
   topUpPromo?: TopUpPromo;
   screensaver?: ScreensaverSettings;
   promoCodes: PromoCode[];
+  /**
+   * Who redeemed which code (upper-cased code → user ids), as the server's `promo_redemptions`: a client redeems a code
+   * once. A code dropped from `promoCodes` takes its redemptions with it (the server soft-deletes the row, and a new code
+   * of the same name is a new row). Absent — none yet.
+   */
+  promoRedemptions?: Record<string, string[]>;
   happyHours: HappyHour[];
   loyalty: LoyaltyLevel[];
   /**

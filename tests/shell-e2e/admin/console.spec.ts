@@ -799,6 +799,111 @@ test('the owner turns on «x2» for top-ups under «Бонусы и акции»
   }
 });
 
+test('the owner creates, lists, edits and deletes a promo code under «Бонусы и акции», saved at once; a client redeems it once', async ({
+  page,
+  request,
+}) => {
+  const owner = auth(await tokenFor(request, OWNER_PIN));
+  type Promo = {
+    code: string;
+    kind: string;
+    value: number;
+    usesLeft: number | null;
+    expiresAt: string | null;
+    used: number;
+  };
+  const promos = async (): Promise<Promo[]> =>
+    ((await (await request.get(`${API}/admin/club`, { headers: owner })).json()) as { promoCodes: Promo[] }).promoCodes;
+  const code = `E2E${Date.now().toString(36).toUpperCase()}`;
+  const d = new Date(Date.now() + 30 * 86_400_000);
+  const until = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
+  await signIn(page, OWNER_PIN);
+  await nav(page).getByText('Бонусы и акции', { exact: true }).click();
+  const section = page.getByTestId('promo-codes');
+  // The codes are a list across the page, not a squashed inline form: the seeded WELCOME reads in words.
+  const welcome = section.getByRole('row').filter({ hasText: 'WELCOME' });
+  await expect(welcome).toContainText(/\+10\s000 сум бонусов/);
+  await expect(welcome).toContainText('Активен');
+  expect((await section.boundingBox())!.width).toBeGreaterThan(1000);
+
+  // Create: a dialog with labelled fields, checked before it is sent.
+  await page.getByRole('button', { name: 'Новый промокод' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Новый промокод' });
+  await expect(dialog.getByLabel('Код')).toHaveValue(/^[A-Z0-9]{8}$/);
+  await dialog.getByLabel('Код').fill('welcome');
+  await dialog.getByRole('button', { name: 'Создать' }).click();
+  await expect(dialog.getByRole('alert')).toHaveText('Такой код уже есть');
+  await dialog.getByLabel('Код').fill('');
+  await expect(dialog.getByRole('alert')).toHaveText('Введите код');
+  await dialog.getByLabel('Код').fill(code.toLowerCase());
+  await dialog.getByLabel('Бонус клиенту').fill('20000');
+  await dialog.getByLabel('Сколько раз можно применить').fill('5');
+  await dialog.getByLabel('Действует до').fill(until);
+  await dialog.getByRole('button', { name: 'Создать' }).click();
+  await expect(dialog).toHaveCount(0);
+  await expect(section.getByRole('status')).toHaveText(`Промокод ${code} создан`);
+  const row = section.getByRole('row').filter({ hasText: code });
+  await expect(row).toContainText(/\+20\s000 сум бонусов/);
+  await expect(row).toContainText('0 / 5');
+  await expect(row).toContainText('Активен');
+  // Saved by the dialog itself: nothing waits for the page's save bar.
+  await expect(page.getByText('Есть несохранённые изменения')).toHaveCount(0);
+  const created = (await promos()).find((p) => p.code === code)!;
+  expect(created).toMatchObject({ kind: 'bonus', value: 2_000_000, usesLeft: 5, used: 0 });
+  expect(Date.parse(created.expiresAt!)).toBeGreaterThan(d.getTime() - 86_400_000);
+
+  // Redeemed (any case) into the bonus account (D-106), once per client.
+  const first = await newClient(request, 'promo-a');
+  const redeemed = await moneyPost(request, '/admin/promo/redeem', { userId: first.id, code: code.toLowerCase() });
+  expect(redeemed.ok(), await redeemed.text()).toBeTruthy();
+  expect(((await redeemed.json()) as { bonusBalance: { amount: number } }).bonusBalance.amount).toBe(2_000_000);
+  const again = await moneyPost(request, '/admin/promo/redeem', { userId: first.id, code });
+  expect(again.status()).toBe(400);
+  expect(await reasonOf(again)).toBe('exhausted');
+
+  // Edit: the sum and the date; the code and the limit stay (server counters), the uses read back.
+  await page.reload();
+  await expect(row).toContainText('1 / 5');
+  await row.getByRole('button', { name: `Изменить ${code}` }).click();
+  const edit = page.getByRole('dialog', { name: `Промокод ${code}` });
+  await expect(edit.getByLabel('Сколько раз можно применить')).toHaveValue('осталось 4');
+  await edit.getByLabel('Бонус клиенту').fill('25000');
+  await edit.getByLabel('Действует до').fill('');
+  await edit.getByRole('button', { name: 'Сохранить' }).click();
+  await expect(edit).toHaveCount(0);
+  await expect(row).toContainText(/\+25\s000 сум бонусов/);
+  await expect(row).toContainText('без срока');
+  await expect(row).toContainText('1 / 5');
+  expect((await promos()).find((p) => p.code === code)).toMatchObject({
+    value: 2_500_000,
+    usesLeft: 4,
+    used: 1,
+    expiresAt: null,
+  });
+  const second = await newClient(request, 'promo-b');
+  const more = await moneyPost(request, '/admin/promo/redeem', { userId: second.id, code });
+  expect(more.ok(), await more.text()).toBeTruthy();
+  expect(((await more.json()) as { bonusBalance: { amount: number } }).bonusBalance.amount).toBe(2_500_000);
+
+  // Delete, behind a confirmation: «Отмена» keeps it, «Удалить» removes it for good.
+  await row.getByRole('button', { name: `Удалить ${code}` }).click();
+  const confirm = page.getByRole('dialog', { name: `Удалить промокод ${code}?` });
+  await confirm.getByRole('button', { name: 'Отмена' }).click();
+  await expect(confirm).toHaveCount(0);
+  await expect(row).toBeVisible();
+  await row.getByRole('button', { name: `Удалить ${code}` }).click();
+  await confirm.getByRole('button', { name: 'Удалить', exact: true }).click();
+  await expect(confirm).toHaveCount(0);
+  await expect(row).toHaveCount(0);
+  await expect(section.getByRole('status')).toHaveText(`Промокод ${code} удалён`);
+  expect((await promos()).some((p) => p.code === code)).toBe(false);
+  await expect(welcome).toBeVisible();
+  const third = await newClient(request, 'promo-c');
+  const gone = await moneyPost(request, '/admin/promo/redeem', { userId: third.id, code });
+  expect(gone.status()).toBe(404);
+});
+
 test('the owner sets the screensaver of the free PCs on «Экран игрока»; the PCs get it with the club config (D-87)', async ({
   page,
   request,

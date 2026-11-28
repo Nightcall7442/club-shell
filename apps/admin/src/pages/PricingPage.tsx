@@ -40,6 +40,7 @@ import {
   inputCls,
 } from '@/ui';
 import { FieldGroup, OwnerPage } from './ownerKit';
+import { PromoCodesSection } from './promoCodes';
 
 type Tab = 'tariffs' | 'days' | 'groups' | 'bonus' | 'happy' | 'loyalty';
 
@@ -666,7 +667,7 @@ function TopUpPromoSection({ promo, set }: { promo: TopUpPromo; set: (p: Partial
   return (
     <Section
       title={t('Акция на пополнение (x2)')}
-      className="max-w-3xl 2xl:col-span-2"
+      className="max-w-3xl xl:max-w-none"
       actions={<Toggle checked={promo.enabled} onChange={(v) => set({ enabled: v })} label={t('Акция включена')} />}
     >
       <div className="flex flex-col gap-4" data-testid="topup-promo">
@@ -739,222 +740,103 @@ function TopUpPromoSection({ promo, set }: { promo: TopUpPromo; set: (p: Partial
   );
 }
 
-function BonusTab({ s, set }: { s: ClubSettings; set: ClubSettingsState['set'] }): JSX.Element {
+/**
+ * The bonus tab: the tier table and the «x2» promotion side by side on a wide screen (saved with the save bar), the
+ * promo codes under them across the whole width (saved at once by their own dialogs: `promoCodes.tsx`). The codes are
+ * listed as saved (`codes`, the loaded copy), never as a draft.
+ */
+function BonusTab({
+  s,
+  set,
+  codes,
+  commit,
+}: {
+  s: ClubSettings;
+  set: ClubSettingsState['set'];
+  codes: PromoCode[];
+  commit: ClubSettingsState['commit'];
+}): JSX.Element {
   const tiers = s.bonusTiers.map((tier, i) => ({ tier, i }));
   const editTier = (i: number, p: Partial<BonusTier>): void =>
     set(
       'bonusTiers',
       s.bonusTiers.map((x, j) => (j === i ? { ...x, ...p } : x)),
     );
-  const promos = s.promoCodes.map((promo, i) => ({ promo, i }));
-  const editPromo = (i: number, p: Partial<PromoCode>): void =>
-    set(
-      'promoCodes',
-      s.promoCodes.map((x, j) => (j === i ? { ...x, ...p } : x)),
-    );
 
   return (
-    <div className="grid grid-cols-1 items-start gap-5 2xl:grid-cols-[28rem_minmax(0,1fr)]">
-      <Section
-        title={t('Бонус за пополнение')}
-        // Two inputs a row: alone on the page it stays a form's width instead of stretching the sum over 1000 px.
-        className="max-w-2xl 2xl:max-w-none"
-        bodyClassName="p-2"
-        actions={
-          <Button
-            size="sm"
-            onClick={() => {
-              const last = s.bonusTiers[s.bonusTiers.length - 1];
-              set('bonusTiers', [
-                ...s.bonusTiers,
-                { minAmount: (last?.minAmount ?? 0) + 5_000_000, bonusPct: (last?.bonusPct ?? 0) + 5 },
-              ]);
-            }}
-          >
-            {t('Добавить')}
-          </Button>
-        }
-      >
-        <Table
-          rows={tiers}
-          rowKey={(r) => String(r.i)}
-          empty={t('Бонусов нет')}
-          columns={[
-            {
-              key: 'min',
-              title: t('От суммы'),
-              render: (r) => (
-                <MoneyInput compact value={r.tier.minAmount} onChange={(n) => editTier(r.i, { minAmount: n })} />
-              ),
-            },
-            {
-              key: 'pct',
-              title: t('Бонус'),
-              width: '8rem',
-              render: (r) => (
-                <NumberInput
-                  value={r.tier.bonusPct}
-                  min={0}
-                  max={100}
-                  suffix="%"
-                  onChange={(n) => editTier(r.i, { bonusPct: n })}
-                />
-              ),
-            },
-            {
-              key: 'rm',
-              title: '',
-              width: '6rem',
-              render: (r) => (
-                <RemoveButton
-                  onClick={() =>
-                    set(
-                      'bonusTiers',
-                      s.bonusTiers.filter((_, j) => j !== r.i),
-                    )
-                  }
-                />
-              ),
-            },
-          ]}
-        />
-      </Section>
-
-      {s.topUpPromo && (
-        <TopUpPromoSection promo={s.topUpPromo} set={(p) => set('topUpPromo', { ...s.topUpPromo!, ...p })} />
-      )}
-
-      <Section
-        title={t('Промокоды')}
-        bodyClassName="p-2"
-        actions={
-          <Button
-            size="sm"
-            onClick={() =>
-              set('promoCodes', [
-                ...s.promoCodes,
-                {
-                  code: `PROMO${s.promoCodes.length + 1}`,
-                  kind: 'bonus',
-                  value: 0,
-                  usesLeft: null,
-                  expiresAt: null,
-                  used: 0,
-                },
-              ])
-            }
-          >
-            {t('Добавить промокод')}
-          </Button>
-        }
-      >
-        <Table
-          rows={promos}
-          rowKey={(r) => String(r.i)}
-          empty={t('Промокодов нет')}
-          columns={[
-            {
-              key: 'code',
-              title: t('Код'),
-              render: (r) => (
-                <Input
-                  className="font-mono uppercase"
-                  value={r.promo.code}
-                  onChange={(e) => editPromo(r.i, { code: e.target.value.toUpperCase().replace(/\s/g, '') })}
-                />
-              ),
-            },
-            {
-              key: 'kind',
-              title: t('Тип'),
-              width: '13rem',
-              render: (r) => (
-                <Segmented
-                  size="md"
-                  label={t('Тип')}
-                  value={r.promo.kind}
-                  onChange={(kind) => editPromo(r.i, { kind, value: kind === 'bonus' ? 0 : 10 })}
-                  options={[
-                    { id: 'bonus', label: t('Бонус') },
-                    { id: 'discountPct', label: t('Скидка %') },
-                  ]}
-                />
-              ),
-            },
-            {
-              key: 'value',
-              title: t('Значение'),
-              width: '10rem',
-              render: (r) =>
-                r.promo.kind === 'bonus' ? (
-                  <MoneyInput compact value={r.promo.value} onChange={(n) => editPromo(r.i, { value: n })} />
-                ) : (
+    <div className="flex flex-col gap-5">
+      {/* Two columns only where both fit (≥1280); the third section never lands in the narrow one (it once did). */}
+      <div className="grid grid-cols-1 items-start gap-5 xl:grid-cols-[minmax(0,26rem)_minmax(0,1fr)]">
+        <Section
+          title={t('Бонус за пополнение')}
+          // Two inputs a row: alone on the page it stays a form's width instead of stretching the sum over 1000 px.
+          className="max-w-2xl xl:max-w-none"
+          bodyClassName="p-2"
+          actions={
+            <Button
+              size="sm"
+              onClick={() => {
+                const last = s.bonusTiers[s.bonusTiers.length - 1];
+                set('bonusTiers', [
+                  ...s.bonusTiers,
+                  { minAmount: (last?.minAmount ?? 0) + 5_000_000, bonusPct: (last?.bonusPct ?? 0) + 5 },
+                ]);
+              }}
+            >
+              {t('Добавить')}
+            </Button>
+          }
+        >
+          <Table
+            rows={tiers}
+            rowKey={(r) => String(r.i)}
+            empty={t('Бонусов нет')}
+            columns={[
+              {
+                key: 'min',
+                title: t('От суммы'),
+                render: (r) => (
+                  <MoneyInput compact value={r.tier.minAmount} onChange={(n) => editTier(r.i, { minAmount: n })} />
+                ),
+              },
+              {
+                key: 'pct',
+                title: t('Бонус'),
+                width: '8rem',
+                render: (r) => (
                   <NumberInput
-                    value={r.promo.value}
+                    value={r.tier.bonusPct}
                     min={0}
                     max={100}
                     suffix="%"
-                    onChange={(n) => editPromo(r.i, { value: n })}
+                    onChange={(n) => editTier(r.i, { bonusPct: n })}
                   />
                 ),
-            },
-            {
-              key: 'left',
-              title: t('Осталось'),
-              width: '7rem',
-              render: (r) => (
-                <Input
-                  inputMode="numeric"
-                  className="tnum"
-                  placeholder="∞"
-                  value={r.promo.usesLeft === null ? '' : String(r.promo.usesLeft)}
-                  onChange={(e) => {
-                    const d = e.target.value.replace(/\D/g, '');
-                    editPromo(r.i, { usesLeft: d === '' ? null : Number(d) });
-                  }}
-                />
-              ),
-            },
-            {
-              key: 'until',
-              title: t('До даты'),
-              width: '10rem',
-              render: (r) => (
-                <input
-                  type="date"
-                  className={clsx(inputCls, 'tnum')}
-                  value={r.promo.expiresAt ? r.promo.expiresAt.slice(0, 10) : ''}
-                  onChange={(e) =>
-                    editPromo(r.i, { expiresAt: e.target.value ? `${e.target.value}T23:59:59.999Z` : null })
-                  }
-                />
-              ),
-            },
-            {
-              key: 'used',
-              title: t('Использовано'),
-              num: true,
-              width: '7rem',
-              render: (r) => r.promo.used,
-            },
-            {
-              key: 'rm',
-              title: '',
-              width: '6rem',
-              render: (r) => (
-                <RemoveButton
-                  onClick={() =>
-                    set(
-                      'promoCodes',
-                      s.promoCodes.filter((_, j) => j !== r.i),
-                    )
-                  }
-                />
-              ),
-            },
-          ]}
-        />
-      </Section>
+              },
+              {
+                key: 'rm',
+                title: '',
+                width: '6rem',
+                render: (r) => (
+                  <RemoveButton
+                    onClick={() =>
+                      set(
+                        'bonusTiers',
+                        s.bonusTiers.filter((_, j) => j !== r.i),
+                      )
+                    }
+                  />
+                ),
+              },
+            ]}
+          />
+        </Section>
+
+        {s.topUpPromo && (
+          <TopUpPromoSection promo={s.topUpPromo} set={(p) => set('topUpPromo', { ...s.topUpPromo!, ...p })} />
+        )}
+      </div>
+      <PromoCodesSection codes={codes} commit={commit} />
     </div>
   );
 }
@@ -1189,7 +1071,9 @@ function PricingView({ initialTab }: { initialTab: Tab }): JSX.Element {
       {tab === 'tariffs' && <TariffsTab zones={(s?.zones ?? []).map((z) => z.name)} pending={settings.dirty} />}
       {s && tab === 'days' && <DaysTab s={s} tariffs={tariffs} set={settings.set} />}
       {s && tab === 'groups' && <GroupsTab s={s} set={settings.set} />}
-      {s && tab === 'bonus' && <BonusTab s={s} set={settings.set} />}
+      {s && tab === 'bonus' && (
+        <BonusTab s={s} set={settings.set} codes={settings.data?.promoCodes ?? []} commit={settings.commit} />
+      )}
       {s && tab === 'happy' && <HappyTab s={s} set={settings.set} />}
       {s && tab === 'loyalty' && <LoyaltyTab s={s} set={settings.set} />}
 

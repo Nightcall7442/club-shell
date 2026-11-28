@@ -87,6 +87,8 @@ import {
   totalsSince,
   visitsOf,
   type AutomationRule,
+  type ClubConfig,
+  type PromoCode,
   type CashMove,
   type DeviceKind,
   type ShiftRecord,
@@ -572,7 +574,6 @@ export function clubRoutes(app: FastifyInstance): void {
       'pricing',
       'groups',
       'bonusTiers',
-      'promoCodes',
       'happyHours',
       'loyalty',
       'limits',
@@ -601,6 +602,7 @@ export function clubRoutes(app: FastifyInstance): void {
     // The player-screen designer (D-105), refused field by field as by the server.
     if ('branding' in b) validateLook(b['branding']);
     if ('topUpPromo' in b) c.topUpPromo = parseTopUpPromo(b['topUpPromo']);
+    if ('promoCodes' in b) syncPromoCodes(c, b['promoCodes']);
     if ('screensaver' in b) c.screensaver = parseScreensaver(b['screensaver']);
     const selfSignupBefore = c.limits.selfSignup === true;
     for (const k of keys) {
@@ -924,9 +926,14 @@ export function clubRoutes(app: FastifyInstance): void {
       if (!user) throw errors.notFound('user');
       const code = club().promoCodes.find((p) => p.code.toUpperCase() === str(b, 'code', 32).toUpperCase());
       if (!code) throw errors.notFound('promo');
-      if (code.expiresAt && code.expiresAt < now()) throw errors.validation('code', 'expired');
+      if (code.expiresAt && Date.parse(code.expiresAt) <= Date.now()) throw errors.validation('code', 'expired');
       if (code.usesLeft !== null && code.usesLeft <= 0) throw errors.validation('code', 'exhausted');
       if (code.kind !== 'bonus') throw errors.validation('code', 'discountAtCheckout');
+      // One redeem per client, as the server's `promo_redemptions` key (code, client).
+      const redemptions = (club().promoRedemptions ??= {});
+      const who = (redemptions[code.code.toUpperCase()] ??= []);
+      if (who.includes(user.id)) throw errors.validation('code', 'exhausted');
+      who.push(user.id);
       applyTransaction(user, 'bonus', uzs(code.value), `Промокод ${code.code}`, null);
       code.used += 1;
       if (code.usesLeft !== null) code.usesLeft -= 1;
@@ -1509,6 +1516,45 @@ export function topUpWithBonus(
 }
 
 export type { ShellFeatures };
+
+/**
+ * `promoCodes` of `PATCH /admin/club` as the server syncs them (ClubSettingsEndpoints.SyncPromoCodesAsync): a code is 1–32
+ * characters and unique ignoring case (`400 promoCodes[i].code required / max / taken`); a kept code (same code ignoring
+ * case) takes the sent kind, value and expiry but keeps its server counters `used` and `usesLeft`; a new one starts from
+ * the sent ones; a dropped one is gone, with its redemptions.
+ */
+function syncPromoCodes(c: ClubConfig, raw: unknown): void {
+  if (!Array.isArray(raw)) throw errors.validation('promoCodes', 'format');
+  const seen = new Set<string>();
+  const sent = raw.map((p: unknown, i): PromoCode => {
+    const at = `promoCodes[${i}]`;
+    if (!isObject(p)) throw errors.validation(at, 'format');
+    const code = typeof p['code'] === 'string' ? p['code'] : '';
+    if (code.length === 0 || code.length > 32)
+      throw errors.validation(`${at}.code`, code.length === 0 ? 'required' : 'max');
+    if (seen.has(code.toUpperCase())) throw errors.validation(`${at}.code`, 'taken');
+    seen.add(code.toUpperCase());
+    const kind = p['kind'];
+    if (kind !== 'bonus' && kind !== 'discountPct') throw errors.validation(`${at}.kind`, 'format');
+    const whole = (v: unknown): v is number => typeof v === 'number' && Number.isSafeInteger(v) && v >= 0;
+    if (!whole(p['value'])) throw errors.validation(`${at}.value`, 'format');
+    const usesLeft = p['usesLeft'] ?? null;
+    if (usesLeft !== null && !whole(usesLeft)) throw errors.validation(`${at}.usesLeft`, 'format');
+    const expiresAt = p['expiresAt'] ?? null;
+    if (expiresAt !== null && (typeof expiresAt !== 'string' || Number.isNaN(Date.parse(expiresAt))))
+      throw errors.validation(`${at}.expiresAt`, 'format');
+    const used = whole(p['used']) ? p['used'] : 0;
+    return { code, kind, value: p['value'], usesLeft, expiresAt, used };
+  });
+  const live = new Map(c.promoCodes.map((p) => [p.code.toUpperCase(), p]));
+  c.promoCodes = sent.map((p) => {
+    const kept = live.get(p.code.toUpperCase());
+    return kept ? { ...p, usesLeft: kept.usesLeft, used: kept.used } : p;
+  });
+  const redemptions = c.promoRedemptions ?? {};
+  for (const code of Object.keys(redemptions)) if (!seen.has(code)) delete redemptions[code];
+  c.promoRedemptions = redemptions;
+}
 
 /** The owner's «x2» promotion, checked as the server checks it (`400 validation` on `topUpPromo.*`). */
 function parseTopUpPromo(raw: unknown): TopUpPromo {
