@@ -174,7 +174,10 @@
       "tariffZone": "This tariff does not apply in this PC's zone: pick another one.",
       "tariffTime": "This tariff is not available right now: pick another one.",
       "pcMaintenance": "This PC is under maintenance: take another one or call the staff.",
-      "blacklisted": "Sign-in is closed for this account: please talk to the staff."
+      "blacklisted": "Sign-in is closed for this account: please talk to the staff.",
+      "minorCurfewHours": "Minors may not play from {{from}} to {{to}}.",
+      "minorCurfewUntil": "Minors may not play from {{from}} to {{to}}: you can buy at most {{minutes}} min now.",
+      "birthDateRequired": "Enter your date of birth: no time can be bought without it."
     },
     "pcNotReady": "The PC is still preparing: the games disks are attaching. Please wait a moment.",
     "reason": {
@@ -188,7 +191,9 @@
       "activeSessionElsewhere": "Your session is open on PC {{pc}}. Sign out there or ask the administrator.",
       "activeSessionElsewhereUnknown": "Your session is open on another PC. Sign out there or ask the administrator.",
       "otherUser": "This session belongs to another player.",
-      "userToken": "Your sign-in was not accepted: please sign in again."
+      "userToken": "Your sign-in was not accepted: please sign in again.",
+      "ageRestrictedHours": "Minors may not play from {{from}} to {{to}}. Come back in the morning.",
+      "birthDateLocked": "Only the club’s staff can change the date of birth."
     }
   },
   "lock": {
@@ -1766,5 +1771,25 @@
     "default": "Obsidian",
     "light": "Daylight",
     "neon": "Neon Night"
+  },
+  "birthDate": {
+    "label": "Date of birth",
+    "day": "Day",
+    "month": "Month",
+    "year": "Year",
+    "askTitle": "Enter your date of birth",
+    "askBody": "The club asks every player for their date of birth: a gift waits for you on your birthday.",
+    "onceHint": "You can enter it once — after that only the staff can change it.",
+    "save": "Save",
+    "locked": "Your date of birth is already set: only the staff can change it.",
+    "problem": {
+      "required": "Choose the day, month and year of birth.",
+      "format": "There is no such date: check the day and the month.",
+      "future": "The date of birth cannot be in the future.",
+      "tooYoung": "Players must be at least 5 years old.",
+      "tooOld": "Check the year of birth."
+    },
+    "walletHint": "Enter your date of birth to buy time.",
+    "walletAction": "Enter date of birth"
   }
 }

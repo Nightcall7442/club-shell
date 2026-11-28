@@ -121,6 +121,11 @@ fn validate_register(mut req: AuthRegisterRequest) -> CmdResult<AuthRegisterRequ
         Some("male" | "female") => {}
         Some(_) => return Err(ShellError::validation("gender", "enum")),
     }
+    // D-107: and the date of birth.
+    req.birth_date = Some(validate::birth_date(
+        "birthDate",
+        req.birth_date.as_deref().unwrap_or_default(),
+    )?);
     Ok(req)
 }
 
@@ -214,7 +219,32 @@ mod tests {
             password: Some("1234".into()),
             accept_rules: None,
             gender: gender.map(Into::into),
+            birth_date: Some("2001-05-17".into()),
         }
+    }
+
+    #[test]
+    fn register_requires_a_real_date_of_birth() {
+        for (date, reason) in [
+            (None, "required"),
+            (Some(" "), "required"),
+            (Some("2001-02-30"), "format"),
+            (Some("17.05.2001"), "format"),
+        ] {
+            let e = validate_register(AuthRegisterRequest {
+                birth_date: date.map(Into::into),
+                ..register(Some("male"))
+            })
+            .unwrap_err();
+            assert_eq!(e.details.as_ref().unwrap()["field"], "birthDate");
+            assert_eq!(e.details.unwrap()["reason"], reason);
+        }
+        let ok = validate_register(AuthRegisterRequest {
+            birth_date: Some(" 2008-02-29 ".into()),
+            ..register(Some("female"))
+        })
+        .unwrap();
+        assert_eq!(ok.birth_date.as_deref(), Some("2008-02-29"));
     }
 
     #[test]

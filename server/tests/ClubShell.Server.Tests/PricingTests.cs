@@ -87,9 +87,52 @@ public sealed class PricingTests
     public void Minors_curfew_runs_from_the_configured_hour_to_six_in_the_morning()
     {
         var club = ClubPricing.Parse("Asia/Tashkent", """{"limits":{"minorAge":18,"minorCurfew":"22:00"}}""");
-        Assert.True(club.InCurfew(2012, SundayEveningUtc)); // 01:30 local
-        Assert.False(club.InCurfew(2000, SundayEveningUtc));
-        Assert.False(club.InCurfew(null, SundayEveningUtc));
-        Assert.False(club.InCurfew(2012, new DateTimeOffset(2026, 9, 29, 10, 0, 0, TimeSpan.Zero))); // 15:00 local
+        var minor = new DateOnly(2012, 3, 1);
+        Assert.True(club.InCurfew("member", minor, SundayEveningUtc)); // 01:30 local
+        Assert.False(club.InCurfew("member", new DateOnly(2000, 1, 1), SundayEveningUtc));
+        Assert.False(club.InCurfew("guest", null, SundayEveningUtc)); // the desk answers for a guest
+        Assert.True(club.InCurfew("member", null, SundayEveningUtc)); // never taken for an adult (D-108)
+        Assert.False(club.InCurfew("member", minor, new DateTimeOffset(2026, 9, 29, 10, 0, 0, TimeSpan.Zero))); // 15:00 local
+    }
+
+    [Fact]
+    public void Curfew_hours_come_from_the_settings_and_the_age_from_the_local_date()
+    {
+        var club = ClubPricing.Parse("Asia/Tashkent", """{"limits":{"minorAge":18,"minorCurfew":"21:30","minorCurfewEnd":"07:00"}}""");
+        Assert.Equal(("21:30", "07:00", true), (club.MinorCurfew, club.MinorCurfewEnd, club.CurfewEnabled));
+        Assert.Equal("Несовершеннолетним нельзя играть с 21:30 до 07:00", club.CurfewText);
+
+        // 2026-11-28 21:40 local = 16:40 UTC; the next start from 20:00 local is 21:30 local the same day.
+        var evening = new DateTimeOffset(2026, 11, 28, 16, 40, 0, TimeSpan.Zero);
+        Assert.True(club.InCurfewHours(evening));
+        Assert.Equal(new DateTimeOffset(2026, 11, 28, 16, 30, 0, TimeSpan.Zero), club.CurfewStartedAt(evening));
+        Assert.Equal(new DateTimeOffset(2026, 11, 28, 16, 30, 0, TimeSpan.Zero), club.NextCurfewStart(new DateTimeOffset(2026, 11, 28, 15, 0, 0, TimeSpan.Zero)));
+        Assert.True(club.InCurfewHours(new DateTimeOffset(2026, 11, 29, 1, 30, 0, TimeSpan.Zero))); // 06:30 local
+        Assert.False(club.InCurfewHours(new DateTimeOffset(2026, 11, 29, 2, 0, 0, TimeSpan.Zero))); // 07:00 local
+
+        // Eighteen on the club's date: the day before the birthday still a minor, on it an adult.
+        var born = new DateOnly(2008, 11, 29);
+        Assert.Equal("minor", club.CurfewHolds("member", born, evening));
+        Assert.Null(club.CurfewHolds("vip", born, new DateTimeOffset(2026, 11, 28, 19, 5, 0, TimeSpan.Zero))); // 00:05 local on the 29th
+
+        var off = ClubPricing.Parse("Asia/Tashkent", """{"limits":{"minorAge":18,"minorCurfew":"22:00","minorCurfewEnabled":false}}""");
+        Assert.Null(off.CurfewHolds("member", born, evening));
+    }
+
+    [Fact]
+    public void Birthday_years_and_ages()
+    {
+        var leap = new DateOnly(2008, 2, 29);
+        Assert.Equal(17, Users.BirthDates.Age(leap, new DateOnly(2026, 2, 28)));
+        Assert.Equal(18, Users.BirthDates.Age(leap, new DateOnly(2026, 3, 1)));
+        Assert.Equal(new DateOnly(2026, 2, 28), Users.BirthDates.BirthdayIn(leap, 2026));
+        Assert.Equal(2026, Users.BirthDates.BirthdayYear(leap, new DateOnly(2026, 3, 2), 3));
+        Assert.Null(Users.BirthDates.BirthdayYear(leap, new DateOnly(2026, 3, 5), 3));
+
+        // Across the new year the gift belongs to the birthday's own year.
+        var december = new DateOnly(1999, 12, 30);
+        Assert.Equal(2025, Users.BirthDates.BirthdayYear(december, new DateOnly(2026, 1, 2), 3));
+        Assert.Equal(2026, Users.BirthDates.BirthdayYear(december, new DateOnly(2026, 12, 28), 3));
+        Assert.Null(Users.BirthDates.BirthdayYear(december, new DateOnly(2026, 12, 28), 0));
     }
 }

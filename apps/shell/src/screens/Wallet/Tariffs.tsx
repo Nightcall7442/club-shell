@@ -22,6 +22,9 @@ import { describeError, useNotificationsStore } from '@/store/notifications';
 import { useSettingsStore } from '@/store/settings';
 import { selectAnimationsEnabled, useThemeStore } from '@/store/theme';
 import { selectBalanceAmount, selectBonusAmount, useWalletStore } from '@/store/wallet';
+import { needsBirthDate } from '@/lib/birthDate';
+import { useAuthStore } from '@/store/auth';
+import { BirthDateModal } from '@/screens/Lock/BirthDateModal';
 import { ModalBackHandler } from './TopUpModal';
 
 export type TariffAction = 'start' | 'extend';
@@ -381,6 +384,9 @@ export function Tariffs({ onInsufficientFunds, className }: TariffsProps): JSX.E
   const session = useSession();
   const [dialog, setDialog] = useState<{ tariff: Tariff; action: TariffAction } | null>(null);
   const [now, setNow] = useState(() => serverNow());
+  // D-107: no time is bought without a date of birth; the player gives it here (once).
+  const askBirthDate = useAuthStore((s) => needsBirthDate(s.user));
+  const [birthOpen, setBirthOpen] = useState(false);
 
   // Availability follows the club clock; a minute resolution is plenty for time windows.
   useEffect(() => {
@@ -419,6 +425,19 @@ export function Tariffs({ onInsufficientFunds, className }: TariffsProps): JSX.E
         <h2 className="font-display text-2xl font-normal text-text tracking-tight">{t('wallet.tariffs')}</h2>
         {zone && <p className="hud-label">{t('wallet.zoneOfPc', { zone })}</p>}
       </div>
+      {askBirthDate && action !== null && (
+        <div
+          role="status"
+          data-birth-date-hint
+          className="glass flex flex-wrap items-center justify-between gap-3 rounded-lg px-4 py-3"
+        >
+          <p className="text-base text-text">{t('birthDate.walletHint')}</p>
+          <Button variant="cta" size="md" onClick={() => setBirthOpen(true)}>
+            {t('birthDate.walletAction')}
+          </Button>
+          <BirthDateModal open={birthOpen} onClose={() => setBirthOpen(false)} />
+        </div>
+      )}
       {loading ? (
         <div className="grid grid-cols-[repeat(auto-fill,minmax(clamp(16.5rem,18vw,21rem),1fr))] gap-[var(--gap)]">
           {Array.from({ length: 3 }, (_, i) => (

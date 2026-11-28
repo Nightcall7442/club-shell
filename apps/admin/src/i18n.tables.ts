@@ -1707,6 +1707,56 @@ export const UZ: Record<string, string> = {
   Женский: 'Ayol',
   'Пол не указан': 'Jinsi koʻrsatilmagan',
   'Укажите пол клиента': 'Mijozning jinsini koʻrsating',
+  // D-107/D-108: the date of birth, the birthday gift and the minors' night curfew.
+  'Укажите дату рождения клиента': 'Mijozning tugʻilgan sanasini koʻrsating',
+  'Дата рождения — в виде ДД.ММ.ГГГГ': 'Tugʻilgan sana — KK.OO.YYYY koʻrinishida',
+  'Дата рождения не может быть в будущем': 'Tugʻilgan sana kelajakda boʻla olmaydi',
+  'Клиенту должно быть не меньше 5 лет': 'Mijoz kamida 5 yoshda boʻlishi kerak',
+  'Проверьте год рождения: больше 100 лет': 'Tugʻilgan yilni tekshiring: 100 yoshdan katta',
+  'Несовершеннолетний: ночью играть нельзя': 'Voyaga yetmagan: kechasi oʻynash mumkin emas',
+  'до {n}': '{n} yoshgacha',
+  'Дата рождения': 'Tugʻilgan sana',
+  'возраст {n}': 'yoshi {n}',
+  'Дата рождения не указана': 'Tugʻilgan sana koʻrsatilmagan',
+  'Дату рождения меняет только касса': 'Tugʻilgan sanani faqat kassa oʻzgartiradi',
+  'Время — в виде ЧЧ:ММ': 'Vaqt — SS:DD koʻrinishida',
+  'Сумма подарка не может быть отрицательной': 'Sovgʻa summasi manfiy boʻla olmaydi',
+  'Окно — не больше 30 дней': 'Oraliq — 30 kundan oshmasin',
+  'Дата рождения не указана: до {from} можно не больше {n} мин':
+    'Tugʻilgan sana koʻrsatilmagan: {from} gacha koʻpi bilan {n} daq mumkin',
+  'Несовершеннолетним нельзя играть с {from} до {to}: можно не больше {n} мин':
+    'Voyaga yetmaganlar {from} dan {to} gacha oʻynay olmaydi: koʻpi bilan {n} daq mumkin',
+  'Несовершеннолетним нельзя играть с {from} до {to}': 'Voyaga yetmaganlar {from} dan {to} gacha oʻynay olmaydi',
+  'С днём рождения! +{sum} бонусов': 'Tugʻilgan kuningiz bilan! +{sum} bonus',
+  'День рождения': 'Tugʻilgan kun',
+  'у клиента день рождения (± {n} дн.) и он играет в клубе':
+    'mijozning tugʻilgan kuni (± {n} kun) va u klubda oʻynayapti',
+  'у клиента день рождения и он играет в клубе': 'mijozning tugʻilgan kuni va u klubda oʻynayapti',
+  'бонус {sum} на бонусный счёт и поздравление на экран, раз в год':
+    'bonus hisobiga {sum} bonus va ekranga tabrik, yiliga bir marta',
+  'За год: {n}': 'Bir yilda: {n}',
+  'Сумма подарка': 'Sovgʻa summasi',
+  'Окно, дней до и после': 'Oraliq, oldin va keyin kunlar',
+  'дн.': 'kun',
+  'Поздравление на экране': 'Ekrandagi tabrik',
+  '{bonus} — сумма. Пусто — «{sample}»': '{bonus} — summa. Boʻsh — «{sample}»',
+  'Игрок увидит: «{text}». Дата рождения — из карточки клиента; бонусы тратятся только на игровое время.':
+    'Oʻyinchi koʻradi: «{text}». Tugʻilgan sana — mijoz kartasidan; bonuslar faqat oʻyin vaqtiga sarflanadi.',
+  'Нет даты рождения': 'Tugʻilgan sana yoʻq',
+  'Ночной запрет для несовершеннолетних': 'Voyaga yetmaganlar uchun tungi taqiq',
+  'В эти часы несовершеннолетний не начнёт и не продлит сеанс ни на ПК, ни на кассе. Идущий сеанс получит предупреждения за 10 и 5 минут и завершится в начале запрета; неоплаченное время вернётся на баланс. Клиент без даты рождения считается несовершеннолетним. Гостей без аккаунта запрет не касается — за них отвечает касса.':
+    'Bu soatlarda voyaga yetmagan seansni na kompyuterda, na kassada boshlay olmaydi va uzaytira olmaydi. Davom etayotgan seans 10 va 5 daqiqa oldin ogohlantiriladi va taqiq boshlanganda yakunlanadi; ishlatilmagan vaqt balansga qaytadi. Tugʻilgan sanasi yoʻq mijoz voyaga yetmagan hisoblanadi. Akkauntsiz mehmonlarga taqiq tegishli emas — ular uchun kassa javob beradi.',
+  'Запрет с': 'Taqiq boshlanishi',
+  'Запрет до': 'Taqiq tugashi',
+  'Изменения даты рождения': 'Tugʻilgan sana oʻzgarishlari',
+  'Игрок на ПК': 'Kompyuterdagi oʻyinchi',
+  'Было → стало': 'Edi → boʻldi',
+  'Ночной запрет для несовершеннолетних: сеанс {name} завершён в {time}, неиспользованное время возвращено':
+    'Voyaga yetmaganlar uchun tungi taqiq: {name} seansi {time} da yakunlandi, ishlatilmagan vaqt qaytarildi',
+  'Ночной запрет для несовершеннолетних: сеанс завершится в {time}':
+    'Voyaga yetmaganlar uchun tungi taqiq: seans {time} da yakunlanadi',
+  'Без даты рождения ночью играть нельзя: укажите её в карточке клиента':
+    'Tugʻilgan sanasiz kechasi oʻynash mumkin emas: uni mijoz kartasida koʻrsating',
   // D-106: the bonus account, play time only.
   'бонусы {sum}': 'bonuslar {sum}',
   'Бонус этого пополнения уже потрачен на время: на бонусах осталось {sum}':
@@ -3421,6 +3471,55 @@ export const EN: Record<string, string> = {
   Женский: 'Female',
   'Пол не указан': 'Gender not given',
   'Укажите пол клиента': 'Choose the client’s gender',
+  // D-107/D-108: the date of birth, the birthday gift and the minors' night curfew.
+  'Укажите дату рождения клиента': 'Enter the client’s date of birth',
+  'Дата рождения — в виде ДД.ММ.ГГГГ': 'Date of birth as DD.MM.YYYY',
+  'Дата рождения не может быть в будущем': 'The date of birth cannot be in the future',
+  'Клиенту должно быть не меньше 5 лет': 'The client must be at least 5 years old',
+  'Проверьте год рождения: больше 100 лет': 'Check the year of birth: over 100 years',
+  'Несовершеннолетний: ночью играть нельзя': 'A minor: no play at night',
+  'до {n}': 'under {n}',
+  'Дата рождения': 'Date of birth',
+  'возраст {n}': 'age {n}',
+  'Дата рождения не указана': 'Date of birth not given',
+  'Дату рождения меняет только касса': 'Only the desk changes the date of birth',
+  'Время — в виде ЧЧ:ММ': 'Time as HH:MM',
+  'Сумма подарка не может быть отрицательной': 'The gift amount cannot be negative',
+  'Окно — не больше 30 дней': 'The window is at most 30 days',
+  'Дата рождения не указана: до {from} можно не больше {n} мин': 'No date of birth: at most {n} min until {from}',
+  'Несовершеннолетним нельзя играть с {from} до {to}: можно не больше {n} мин':
+    'Minors may not play from {from} to {to}: at most {n} min',
+  'Несовершеннолетним нельзя играть с {from} до {to}': 'Minors may not play from {from} to {to}',
+  'С днём рождения! +{sum} бонусов': 'Happy birthday! +{sum} bonus',
+  'День рождения': 'Birthday',
+  'у клиента день рождения (± {n} дн.) и он играет в клубе':
+    'it is the client’s birthday (± {n} days) and they play at the club',
+  'у клиента день рождения и он играет в клубе': 'it is the client’s birthday and they play at the club',
+  'бонус {sum} на бонусный счёт и поздравление на экран, раз в год':
+    '{sum} bonus to the bonus account and a greeting on the screen, once a year',
+  'За год: {n}': 'This year: {n}',
+  'Сумма подарка': 'Gift amount',
+  'Окно, дней до и после': 'Window, days before and after',
+  'дн.': 'days',
+  'Поздравление на экране': 'Greeting on the screen',
+  '{bonus} — сумма. Пусто — «{sample}»': '{bonus} is the amount. Empty — “{sample}”',
+  'Игрок увидит: «{text}». Дата рождения — из карточки клиента; бонусы тратятся только на игровое время.':
+    'The player sees: “{text}”. The date of birth comes from the client card; bonuses pay for play time only.',
+  'Нет даты рождения': 'No date of birth',
+  'Ночной запрет для несовершеннолетних': 'Night curfew for minors',
+  'В эти часы несовершеннолетний не начнёт и не продлит сеанс ни на ПК, ни на кассе. Идущий сеанс получит предупреждения за 10 и 5 минут и завершится в начале запрета; неоплаченное время вернётся на баланс. Клиент без даты рождения считается несовершеннолетним. Гостей без аккаунта запрет не касается — за них отвечает касса.':
+    'In these hours a minor cannot start or extend a session, on a PC or at the desk. A running session is warned 10 and 5 minutes before and ends when the curfew starts; unused time goes back to the balance. A client without a date of birth counts as a minor. Guests without an account are not covered — the desk answers for them.',
+  'Запрет с': 'Curfew from',
+  'Запрет до': 'Curfew until',
+  'Изменения даты рождения': 'Date of birth changes',
+  'Игрок на ПК': 'Player at the PC',
+  'Было → стало': 'Before → after',
+  'Ночной запрет для несовершеннолетних: сеанс {name} завершён в {time}, неиспользованное время возвращено':
+    'Night curfew for minors: {name}’s session ended at {time}, unused time refunded',
+  'Ночной запрет для несовершеннолетних: сеанс завершится в {time}':
+    'Night curfew for minors: the session ends at {time}',
+  'Без даты рождения ночью играть нельзя: укажите её в карточке клиента':
+    'Without a date of birth there is no play at night: enter it in the client card',
   // D-106: the bonus account, play time only.
   'бонусы {sum}': 'bonus {sum}',
   'Бонус этого пополнения уже потрачен на время: на бонусах осталось {sum}':

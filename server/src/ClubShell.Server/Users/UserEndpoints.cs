@@ -19,7 +19,8 @@ public sealed class UserRow
 {
     public const string Select = """
         SELECT u.id, u.username, u.display_name, u.avatar_url, u.role, u.locale, u.flags, u.banned, u.created_at, u.last_seen_at,
-               u.unlock_pin_hash IS NOT NULL AS pin_set, w.main_balance, w.bonus_balance, w.lifetime_spent
+               u.unlock_pin_hash IS NOT NULL AS pin_set, w.main_balance, w.bonus_balance, w.lifetime_spent,
+               to_char(u.birth_date, 'YYYY-MM-DD') AS birth_date
         FROM users u JOIN wallets w ON w.user_id = u.id
         """;
 
@@ -47,17 +48,20 @@ public sealed class UserRow
     public long BonusBalance { get; init; }
     public long LifetimeSpent { get; init; }
 
+    /// <summary><c>users.birth_date</c> as <c>YYYY-MM-DD</c> (D-107); null — not given.</summary>
+    public string? BirthDate { get; init; }
+
     /// <summary>
     /// One loyalty model (§5.13 item 5): the club's level by lifetime spend, 0-based on the wire; points = spend / 100. The
     /// stored flags plus <c>banned</c> and <see cref="PinSetFlag"/> as they apply. <c>bonus</c> (beyond the contract, D-106): the
-    /// bonus account, play time only.
+    /// bonus account, play time only. <c>birthDate</c> (beyond the contract, D-107): null until given.
     /// </summary>
     public User ToWire(ClubPricing club) => new(
         Id, Username, DisplayName, AvatarUrl, Enum.Parse<UserRole>(Role, ignoreCase: true), Money.Uzs(MainBalance),
         Math.Max(0, (club.LevelOf(LifetimeSpent)?.Level ?? 1) - 1), Points(LifetimeSpent), CreatedAt, LastSeenAt,
         Enum.Parse<Locale>(Locale, ignoreCase: true),
         [.. Flags, .. Banned ? new[] { UserFlags.Banned } : [], .. PinSet ? new[] { PinSetFlag } : []],
-        Money.Uzs(BonusBalance));
+        Money.Uzs(BonusBalance), BirthDate);
 
     public static int Points(long tiyin) => (int)Math.Min(int.MaxValue, tiyin / 100);
 }
@@ -104,8 +108,14 @@ public static partial class UserEndpoints
         return row?.ToWire(club.Pricing) ?? throw ApiException.NotFound("user");
     }
 
-    /// <summary>Partial update, at least one field (§ contract <c>ProfileUpdateRequest</c>); a guest may not (403 guest).</summary>
-    private static async Task<IResult> UpdateAsync(HttpContext context, Guid userId, [FromBody] System.Text.Json.JsonElement body, NpgsqlDataSource db)
+    /// <summary>
+    /// Partial update, at least one field (§ contract <c>ProfileUpdateRequest</c>); a guest may not (403 guest).
+    /// <c>birthDate</c> (beyond the contract, D-107): the player gives it once, while the account has none (<c>400 birthDate
+    /// format|future|min|max</c>); then only the desk changes it — <c>403 forbidden birthDateLocked</c>, so a minor cannot edit
+    /// their way past the curfew (D-108). The player's own date is journaled (<c>clientBirthDate</c>, no staff member).
+    /// </summary>
+    private static async Task<IResult> UpdateAsync(
+        HttpContext context, Guid userId, [FromBody] System.Text.Json.JsonElement body, NpgsqlDataSource db, TimeProvider clock)
     {
         var request = Api.Read<ProfileUpdateRequest>(body);
         await using var c = await db.OpenConnectionAsync();
@@ -114,10 +124,15 @@ public static partial class UserEndpoints
             throw ApiException.Forbidden("guest", "A guest has no profile to change");
         }
 
-        if (request is { DisplayName: null, AvatarUrl: null, Locale: null, Pin: null })
+        if (request is { DisplayName: null, AvatarUrl: null, Locale: null, Pin: null, BirthDate: null })
         {
             throw ApiException.Validation("body", "required", "Nothing to update");
         }
+
+        var pc = context.Features.GetRequiredFeature<AgentContext>().Pc;
+        var club = await SessionService.ClubAsync(c, null, pc.ClubId);
+        var now = clock.GetUtcNow();
+        var birthDate = request.BirthDate is null ? null : BirthDates.Format(BirthDates.Required(request.BirthDate, BirthDates.Today(now, club.Pricing.TimeZone)));
 
         var name = request.DisplayName?.Trim();
         if (name is { Length: 0 or > 64 })
@@ -141,17 +156,49 @@ public static partial class UserEndpoints
             throw ApiException.Validation("pin", "format");
         }
 
-        await c.ExecuteAsync(
-            """
-            UPDATE users SET display_name = coalesce(@name, display_name), avatar_url = coalesce(@avatar, avatar_url),
-                             locale = coalesce(@locale, locale), unlock_pin_hash = coalesce(@pin, unlock_pin_hash)
-            WHERE id = @userId
-            """,
-            new
+        await using (var tx = await c.BeginTransactionAsync())
+        {
+            if (birthDate is not null)
             {
-                userId, name, avatar = request.AvatarUrl, locale = request.Locale is { } l ? System.Text.Json.JsonNamingPolicy.CamelCase.ConvertName(l.ToString()) : null,
-                pin = request.Pin is null ? null : Passwords.Hash(request.Pin),
-            });
+                var stored = await c.QuerySingleAsync<(string? BirthDate, string DisplayName)>(
+                    "SELECT to_char(birth_date, 'YYYY-MM-DD'), display_name FROM users WHERE id = @userId FOR UPDATE", new { userId }, tx);
+                if (stored.BirthDate is not null)
+                {
+                    throw ApiException.Forbidden("birthDateLocked", "Only the club's desk changes the date of birth");
+                }
+
+                await c.ExecuteAsync(
+                    """
+                    UPDATE users SET birth_date = @birthDate::date WHERE id = @userId;
+                    INSERT INTO client_profiles (club_id, user_id, birth_year, updated_at)
+                    VALUES (@ClubId, @userId, extract(year FROM @birthDate::date)::int, @now)
+                    ON CONFLICT (club_id, user_id) DO UPDATE SET birth_year = excluded.birth_year, updated_at = excluded.updated_at;
+                    INSERT INTO audit_entries (id, club_id, at, staff_id, staff_name, action, user_id, pc_id, detail, meta)
+                    VALUES (@auditId, @ClubId, @now, NULL, '', 'clientBirthDate', @userId, @pcId, @detail, @meta::jsonb);
+                    """,
+                    new
+                    {
+                        userId, birthDate, pc.ClubId, now, pcId = pc.Id, auditId = Guid.CreateVersion7(now), detail = $"{stored.DisplayName} · — → {birthDate} · {pc.Name}",
+                        meta = System.Text.Json.JsonSerializer.Serialize(new { before = (string?)null, after = birthDate, clientName = stored.DisplayName, byPlayer = true }, ServerJson.Options),
+                    },
+                    tx);
+            }
+
+            await c.ExecuteAsync(
+                """
+                UPDATE users SET display_name = coalesce(@name, display_name), avatar_url = coalesce(@avatar, avatar_url),
+                                 locale = coalesce(@locale, locale), unlock_pin_hash = coalesce(@pin, unlock_pin_hash)
+                WHERE id = @userId
+                """,
+                new
+                {
+                    userId, name, avatar = request.AvatarUrl, locale = request.Locale is { } l ? System.Text.Json.JsonNamingPolicy.CamelCase.ConvertName(l.ToString()) : null,
+                    pin = request.Pin is null ? null : Passwords.Hash(request.Pin),
+                },
+                tx);
+            await tx.CommitAsync();
+        }
+
         return TypedResults.Ok(await LoadAsync(c, context, userId));
     }
 

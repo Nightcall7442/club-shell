@@ -25,8 +25,18 @@ public static class Players
 
     private static readonly Lazy<string> Hash = new(() => Passwords.Hash(Password));
 
-    /// <summary>A member with <paramref name="balance"/> tiyin posted through the ledger (the invariant holds from the start).</summary>
-    public static async Task<TestPlayer> CreateAsync(ServerFixture server, long balance = 10_000_000, string role = "member", string? card = null)
+    /// <summary>
+    /// The date of birth of a test player unless a test says otherwise (D-107: every new account has one; an adult, so the
+    /// minors' curfew of D-108 never touches tests that run at night).
+    /// </summary>
+    public const string AdultBirthDate = "1990-05-17";
+
+    /// <summary>
+    /// A member with <paramref name="balance"/> tiyin posted through the ledger (the invariant holds from the start), born
+    /// on <paramref name="birthDate"/> (null — an account made before D-107, without one).
+    /// </summary>
+    public static async Task<TestPlayer> CreateAsync(
+        ServerFixture server, long balance = 10_000_000, string role = "member", string? card = null, string? birthDate = AdultBirthDate)
     {
         var player = new TestPlayer(Guid.NewGuid(), "p-" + Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(6)));
         await using var c = await OpenAsync(server);
@@ -35,10 +45,11 @@ public static class Players
         var now = server.Clock.GetUtcNow();
         await c.ExecuteAsync(
             """
-            INSERT INTO users (id, network_id, username, display_name, role, password_hash, card_id, created_at) VALUES (@Id, @network, @Username, @Username, @role, @hash, @card, @now);
+            INSERT INTO users (id, network_id, username, display_name, role, password_hash, card_id, birth_date, created_at)
+            VALUES (@Id, @network, @Username, @Username, @role, @hash, @card, @birthDate::date, @now);
             INSERT INTO wallets (user_id, network_id, updated_at) VALUES (@Id, @network, @now);
             """,
-            new { player.Id, player.Username, network, role, hash = Hash.Value, card, now },
+            new { player.Id, player.Username, network, role, hash = Hash.Value, card, now, birthDate },
             tx);
         if (balance != 0)
         {
@@ -49,7 +60,10 @@ public static class Players
         return player;
     }
 
-    /// <summary>A desk registration body with <c>gender</c> (D-104: required) unless it names one.</summary>
+    /// <summary>
+    /// A desk registration body with <c>gender</c> (D-104: required) and <c>birthDate</c> (D-107: required) unless it names
+    /// them.
+    /// </summary>
     public static System.Text.Json.Nodes.JsonObject WithGender(object body, string gender = "male")
     {
         var node = JsonSerializer.SerializeToNode(body)!.AsObject();
@@ -58,8 +72,38 @@ public static class Players
             node["gender"] = gender;
         }
 
+        if (!node.ContainsKey("birthDate"))
+        {
+            node["birthDate"] = AdultBirthDate;
+        }
+
         return node;
     }
+
+    /// <summary>A date of birth that makes the player <paramref name="years"/> old on the fixture's date (club-local).</summary>
+    public static string BornYearsAgo(ServerFixture server, int years) =>
+        DateOnly.FromDateTime(ClubTime.Local(server.Clock.GetUtcNow(), "Asia/Tashkent")).AddYears(-years).AddDays(-1)
+            .ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
+
+    /// <summary>
+    /// The minors' forbidden hours (D-108) from <paramref name="fromMinutes"/> to <paramref name="toMinutes"/> minutes around
+    /// the fixture's now (club-local, whole minutes), on top of the club's <c>limits</c>.
+    /// </summary>
+    public static Task CurfewAsync(ServerFixture server, int fromMinutes = -60, int toMinutes = 60)
+    {
+        var local = ClubTime.Local(server.Clock.GetUtcNow(), "Asia/Tashkent");
+        string Hhmm(int minutes) => local.AddMinutes(minutes).ToString("HH:mm", System.Globalization.CultureInfo.InvariantCulture);
+        return ExecuteAsync(server,
+            """
+            UPDATE clubs SET settings = settings || jsonb_build_object('limits', coalesce(settings -> 'limits', '{}'::jsonb)
+                || jsonb_build_object('minorAge', 18, 'minorCurfew', @from::text, 'minorCurfewEnd', @to::text))
+            """,
+            new { from = Hhmm(fromMinutes), to = Hhmm(toMinutes) });
+    }
+
+    /// <summary>Sets (or with null clears) the player's date of birth straight in the table.</summary>
+    public static Task BirthDateAsync(ServerFixture server, TestPlayer player, string? birthDate) =>
+        ExecuteAsync(server, "UPDATE users SET birth_date = @birthDate::date WHERE id = @Id", new { player.Id, birthDate });
 
     /// <summary>The player's profile in the club (group, blacklist, birth year).</summary>
     public static async Task ProfileAsync(ServerFixture server, TestPlayer player, string? groupId = null, bool blacklisted = false, int? birthYear = null)

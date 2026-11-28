@@ -292,6 +292,19 @@ pub(crate) mod validate {
         }
     }
 
+    /// A date of birth (D-107): a real calendar date `YYYY-MM-DD`, trimmed; the age range is the server's to check, on
+    /// the club's date. `required` when blank, `format` otherwise.
+    pub fn birth_date(field: &str, value: &str) -> CmdResult<String> {
+        let v = value.trim();
+        if v.is_empty() {
+            return Err(ShellError::validation(field, "required"));
+        }
+        if v.len() != 10 || chrono::NaiveDate::parse_from_str(v, "%Y-%m-%d").is_err() {
+            return Err(ShellError::validation(field, "format"));
+        }
+        Ok(v.to_owned())
+    }
+
     /// Bare file name for `themes\<name>.json` and similar: 1–64 chars of `A-Z a-z 0-9 - _`
     /// (no separators, no dots, so it can never escape its directory).
     pub fn bare_name(field: &str, value: &str) -> CmdResult<()> {

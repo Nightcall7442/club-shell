@@ -60,7 +60,7 @@ public sealed class LoyaltyLevel
 /// <summary>
 /// The pricing inputs of a club: its IANA zone and the <c>pricing</c>, <c>groups</c>, <c>happyHours</c>, <c>loyalty</c>
 /// and <c>limits</c> keys of <c>clubs.settings</c> (<c>AdminClubSettings</c>, written by <c>PATCH /admin/club</c> in S5).
-/// A missing key means no rule: every day 100 %, no discounts, minors under 18 off the PCs from 22:00 to 06:00.
+/// A missing key means no rule: every day 100 %, no discounts, minors under 18 off the PCs from 22:00 to 06:00 (D-108).
 /// </summary>
 public sealed class ClubPricing
 {
@@ -74,8 +74,20 @@ public sealed class ClubPricing
     /// <summary>Sorted by <c>minSpent</c>.</summary>
     public LoyaltyLevel[] Loyalty { get; init; } = [];
 
+    /// <summary>
+    /// <c>limits.minorCurfewEnabled</c> (beyond the contract, D-108): the minors' night curfew applies; on unless the owner
+    /// turned it off.
+    /// </summary>
+    public bool CurfewEnabled { get; init; } = true;
+
+    /// <summary><c>limits.minorAge</c>: a player younger than this on the club's local date is a minor (D-108).</summary>
     public int MinorAge { get; init; } = 18;
+
+    /// <summary><c>limits.minorCurfew</c>: the forbidden hours start (<c>HH:mm</c>, club-local).</summary>
     public string MinorCurfew { get; init; } = "22:00";
+
+    /// <summary><c>limits.minorCurfewEnd</c> (beyond the contract, D-108): the forbidden hours end (<c>HH:mm</c>, club-local).</summary>
+    public string MinorCurfewEnd { get; init; } = "06:00";
 
     /// <summary>
     /// <c>limits.guestPostpaid</c> (beyond the contract, owner's choice in the console): the desk may seat a guest postpaid,
@@ -119,7 +131,9 @@ public sealed class ClubPricing
             HappyHours = doc?.HappyHours ?? [],
             Loyalty = (doc?.Loyalty ?? []).OrderBy(l => l.MinSpent).ToArray(),
             MinorAge = doc?.Limits?.MinorAge ?? 18,
-            MinorCurfew = doc?.Limits?.MinorCurfew ?? "22:00",
+            MinorCurfew = ClubTime.Minutes(doc?.Limits?.MinorCurfew) is null ? "22:00" : doc!.Limits!.MinorCurfew!,
+            MinorCurfewEnd = ClubTime.Minutes(doc?.Limits?.MinorCurfewEnd) is null ? "06:00" : doc!.Limits!.MinorCurfewEnd!,
+            CurfewEnabled = doc?.Limits?.MinorCurfewEnabled ?? true,
             GuestPostpaid = doc?.Limits?.GuestPostpaid ?? true,
             GuestDebtLimit = doc?.Limits?.GuestDebtLimit is > 0 and var limit ? limit : null,
             MemberDebtLimit = doc?.Limits?.MemberDebtLimit is > 0 and var memberLimit ? memberLimit : null,
@@ -132,20 +146,78 @@ public sealed class ClubPricing
     public LoyaltyLevel? LevelOf(long lifetimeSpent) => Loyalty.LastOrDefault(l => l.MinSpent <= lifetimeSpent);
 
     /// <summary>
-    /// A minor (<c>birthYear</c> set, younger than <c>minorAge</c> this local year) in the curfew: from
-    /// <c>minorCurfew</c> until 06:00 local time (DESIGN §5.2 rule 5; mock <c>club.ts inCurfew</c>).
+    /// Who the minors' curfew holds (D-108, DESIGN §5.2 rule 5): <c>minor</c> — a member younger than <see cref="MinorAge"/>
+    /// on the club's local date; <c>noBirthDate</c> — a member whose date of birth is not known (never taken for an adult);
+    /// null — anyone else (an adult, a guest of the desk, a staff account) or the curfew is off.
     /// </summary>
-    public bool InCurfew(int? birthYear, DateTimeOffset at)
+    public string? CurfewHolds(string role, DateOnly? birthDate, DateTimeOffset at)
     {
-        var local = ClubTime.Local(at, TimeZone);
-        if (birthYear is not { } year || local.Year - year >= MinorAge)
+        if (!CurfewEnabled || role is not ("member" or "vip"))
         {
-            return false;
+            return null;
         }
 
-        var minutes = (local.Hour * 60) + local.Minute;
-        return minutes >= (ClubTime.Minutes(MinorCurfew) ?? 22 * 60) || minutes < 6 * 60;
+        if (birthDate is not { } birth)
+        {
+            return "noBirthDate";
+        }
+
+        return Users.BirthDates.Age(birth, Users.BirthDates.Today(at, TimeZone)) < MinorAge ? "minor" : null;
     }
+
+    /// <summary>
+    /// <paramref name="at"/> falls in the forbidden hours, <see cref="MinorCurfew"/> (inclusive) to <see cref="MinorCurfewEnd"/>
+    /// (exclusive) club-local; a window over midnight when the start is later than the end, none when they are equal.
+    /// </summary>
+    public bool InCurfewHours(DateTimeOffset at)
+    {
+        var local = ClubTime.Local(at, TimeZone);
+        var minutes = (local.Hour * 60) + local.Minute;
+        var (from, to) = (ClubTime.Minutes(MinorCurfew) ?? 22 * 60, ClubTime.Minutes(MinorCurfewEnd) ?? 6 * 60);
+        return from != to && (from < to ? minutes >= from && minutes < to : minutes >= from || minutes < to);
+    }
+
+    /// <summary>A minor, or a member without a date of birth, in the forbidden hours: no session may start, resume or extend.</summary>
+    public bool InCurfew(string role, DateOnly? birthDate, DateTimeOffset at) =>
+        CurfewHolds(role, birthDate, at) is not null && InCurfewHours(at);
+
+    /// <summary>
+    /// The next start of the forbidden hours from <paramref name="at"/> on (<paramref name="at"/> itself inside them); null
+    /// without a window.
+    /// </summary>
+    public DateTimeOffset? NextCurfewStart(DateTimeOffset at)
+    {
+        if (InCurfewHours(at))
+        {
+            return at;
+        }
+
+        var (from, to) = (ClubTime.Minutes(MinorCurfew) ?? 22 * 60, ClubTime.Minutes(MinorCurfewEnd) ?? 6 * 60);
+        if (from == to)
+        {
+            return null;
+        }
+
+        var local = ClubTime.Local(at, TimeZone);
+        var start = local.Date.AddMinutes(from);
+        return ClubTime.Utc(start > local ? start : start.AddDays(1), TimeZone);
+    }
+
+    /// <summary>The start of the forbidden hours <paramref name="at"/> falls in; null outside them.</summary>
+    public DateTimeOffset? CurfewStartedAt(DateTimeOffset at)
+    {
+        if (!InCurfewHours(at))
+        {
+            return null;
+        }
+
+        var local = ClubTime.Local(at, TimeZone);
+        var start = local.Date.AddMinutes(ClubTime.Minutes(MinorCurfew) ?? 22 * 60);
+        return ClubTime.Utc(start > local ? start.AddDays(-1) : start, TimeZone);
+    }
+
+    /// <summary>The refusal's text: «Несовершеннолетним нельзя играть с 22:00 до 06:00».</summary>
+    public string CurfewText => $"Несовершеннолетним нельзя играть с {MinorCurfew} до {MinorCurfewEnd}";
 
     private sealed class SettingsDoc
     {
@@ -167,6 +239,8 @@ public sealed class ClubPricing
     {
         public int? MinorAge { get; init; }
         public string? MinorCurfew { get; init; }
+        public string? MinorCurfewEnd { get; init; }
+        public bool? MinorCurfewEnabled { get; init; }
         public bool? GuestPostpaid { get; init; }
         public long? GuestDebtLimit { get; init; }
         public long? MemberDebtLimit { get; init; }

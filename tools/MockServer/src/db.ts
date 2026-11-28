@@ -775,6 +775,8 @@ export function publicUser(u: UserRecord): User {
     flags: u.flags,
     // D-106: the bonus account, play time only (beyond the contract).
     bonus: u.bonus,
+    // D-107: the date of birth (beyond the contract); null — not given yet, the Shell asks for it.
+    birthDate: u.birthDate ?? null,
   };
 }
 
@@ -1232,6 +1234,8 @@ function seedUsers(t0: number): UserRecord[] {
     bonus: zero(),
     muted: false,
     transient: false,
+    // D-107: every account has its date of birth; the demo players are adults.
+    birthDate: '1998-04-12',
     ...extra,
   });
   return [

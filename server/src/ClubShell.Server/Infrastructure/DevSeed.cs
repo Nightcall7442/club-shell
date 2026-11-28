@@ -95,21 +95,22 @@ public static class DevSeed
                 tx);
         }
 
-        foreach (var (key, display, role, locale, card, balance) in new[]
+        // D-107: every account has its date of birth; the demo players are adults.
+        foreach (var (key, display, role, locale, card, balance, birthDate) in new[]
         {
-            ("alisher", "Alisher K.", "member", "ru", "CARD-0001", 4_500_000L),
-            ("dilnoza", "Dilnoza R.", "vip", "uz", "CARD-0002", 12_000_000L),
-            ("bekzod", "Bekzod T.", "member", "en", "CARD-0003", 300_000L),
+            ("alisher", "Alisher K.", "member", "ru", "CARD-0001", 4_500_000L, "1998-04-12"),
+            ("dilnoza", "Dilnoza R.", "vip", "uz", "CARD-0002", 12_000_000L, "2001-09-03"),
+            ("bekzod", "Bekzod T.", "member", "en", "CARD-0003", 300_000L, "1995-01-27"),
         })
         {
             var id = Sid("user:" + key);
             var inserted = await c.ExecuteAsync(
                 """
-                INSERT INTO users (id, network_id, username, display_name, role, locale, password_hash, card_id, created_at)
-                VALUES (@id, @networkId, @key, @display, @role, @locale, @hash, @card, @now)
+                INSERT INTO users (id, network_id, username, display_name, role, locale, password_hash, card_id, birth_date, created_at)
+                VALUES (@id, @networkId, @key, @display, @role, @locale, @hash, @card, @birthDate::date, @now)
                 ON CONFLICT DO NOTHING
                 """,
-                new { id, networkId, key, display, role, locale, hash = DemoPassword.Value, card, now },
+                new { id, networkId, key, display, role, locale, hash = DemoPassword.Value, card, birthDate, now },
                 tx);
             if (inserted == 1)
             {

@@ -414,9 +414,12 @@ public static class PlayerAuthEndpoints
                 throw ApiException.Forbidden("banned", "The account is banned");
             }
 
-            if (club.Pricing.InCurfew(buyer.BirthYear, now))
+            // D-108: a minor whose date of birth is known stays off the PC in the forbidden hours. A member without one may
+            // sign in (to give it, D-107); nothing starts for them then (birthDateRequired).
+            if (club.Pricing.CurfewHolds(buyer.Role, buyer.BirthDate, now) == "minor" && club.Pricing.InCurfewHours(now))
             {
-                throw ApiException.Forbidden("ageRestricted", "Minors may not play at this hour");
+                throw new ApiException(StatusCodes.Status403Forbidden, ErrorCode.Forbidden, club.Pricing.CurfewText,
+                    new { reason = "ageRestricted", from = club.Pricing.MinorCurfew, to = club.Pricing.MinorCurfewEnd });
             }
 
             open = await c.QuerySingleOrDefaultAsync<SessionRow>(

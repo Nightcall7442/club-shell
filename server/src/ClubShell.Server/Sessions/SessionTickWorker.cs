@@ -123,6 +123,7 @@ public sealed class SessionTickWorker(
                 }
             }
 
+            await CurfewAsync(c, tx, now, effects);
             await tx.CommitAsync(cancellationToken);
         }
 
@@ -165,6 +166,110 @@ public sealed class SessionTickWorker(
         if (signOut && s.Transient)
         {
             await SessionService.SignOutAsync(c, tx, s.UserId, s.PcId, effects);
+        }
+    }
+
+    /// <summary>Minutes before the minors' forbidden hours at which their open session is warned (D-108: 21:50 and 21:55).</summary>
+    public static readonly int[] CurfewWarningMinutes = [10, 5];
+
+    /// <summary>
+    /// The minors' night curfew (D-108), per club whose curfew is on, from <see cref="CurfewWarningMinutes"/> before the
+    /// forbidden hours until they end: every open session of a minor — or of a member without a date of birth, never taken
+    /// for an adult — on a PC the server's clock decides (fresh heartbeat, empty outbox; an offline PC is its agent's) is
+    /// warned 10 and 5 minutes before (a <c>notification</c> push, marked by a <c>server</c>/<c>curfewWarning</c> session
+    /// event so a restart does not warn twice), and ended once they start: settled as the desk's end (<c>admin</c>, unused
+    /// hourly time refunded, the bonus account first, D-106) at the start of the hours when the tick is that close to it,
+    /// else now; <c>endSession</c> queued, the player signed out of the PC (D-28) — the agent locks it as after a desk end —
+    /// and a <c>server</c>/<c>curfewEnd</c> session event for the desk's seat note. The PC's lock is taken without waiting,
+    /// as for a guest's end: while a sign-in or a desk action of that PC runs, the next tick does it.
+    /// </summary>
+    private async Task CurfewAsync(NpgsqlConnection c, NpgsqlTransaction tx, DateTimeOffset now, SessionEffects effects)
+    {
+        var clubs = (await c.QueryAsync<(Guid Id, string TimeZone, string Settings)>(
+            "SELECT id, time_zone, settings::text FROM clubs WHERE NOT disabled", transaction: tx)).ToList();
+        foreach (var (clubId, timeZone, settings) in clubs)
+        {
+            var pricing = ClubPricing.Parse(timeZone, settings);
+            if (!pricing.CurfewEnabled || pricing.NextCurfewStart(now) is not { } next)
+            {
+                continue;
+            }
+
+            var started = pricing.CurfewStartedAt(now);
+            if (started is null && next - now > TimeSpan.FromMinutes(CurfewWarningMinutes.Max()))
+            {
+                continue;
+            }
+
+            var open = (await c.QueryAsync<CurfewRow>(
+                $"""
+                SELECT s.*, u.role, to_char(u.birth_date, 'YYYY-MM-DD') AS birth_date, t.settled,
+                       (SELECT coalesce(array_agg((e.data ->> 'minutes')::int), ARRAY[]::int[]) FROM session_events e
+                        WHERE e.session_id = s.id AND e.source = 'server' AND e.type = 'curfewWarning' AND e.at > @since) AS curfew_warned
+                FROM sessions s JOIN pcs p ON p.id = s.pc_id JOIN users u ON u.id = s.user_id
+                CROSS JOIN LATERAL (SELECT coalesce(p.last_heartbeat_at > @fresh AND coalesce((p.last_heartbeat->>'offlineQueue')::int, 0) = 0, false) AS settled) t
+                WHERE s.club_id = @clubId AND s.state <> 'ended' AND u.role IN ('member', 'vip') AND NOT u.transient
+                ORDER BY s.started_at, s.id
+                FOR UPDATE OF s SKIP LOCKED
+                """,
+                new { clubId, fresh = now - TimeSpan.FromSeconds(agents.OfflineAfterSec), since = now - TimeSpan.FromHours(1) },
+                tx)).ToList();
+            foreach (var s in open.Where(s => s.Settled && pricing.CurfewHolds(s.Role, Users.BirthDates.Parse(s.BirthDate), now) is not null))
+            {
+                var unknown = s.BirthDate is null;
+                if (started is { } start)
+                {
+                    if (!await AdvisoryLocks.TryPcAsync(c, tx, s.PcId))
+                    {
+                        continue;
+                    }
+
+                    // A tick that close to the start ends the session there (the minutes after it are not the player's); a PC
+                    // that came back later played on as its agent let it, and is settled now.
+                    var end = now - start <= TimeSpan.FromMinutes(2) ? Max(start, s.LastTransitionAt) : now;
+                    await sessions.SettleAsync(c, tx, s, end, SessionEndReason.Admin, effects);
+                    effects.Sessions.RemoveAll(pushed => pushed.Id == s.Id);
+                    effects.Notifications.Add((s.PcId, new Notification(
+                        Guid.NewGuid(), "Сеанс завершён",
+                        unknown ? $"В аккаунте не указана дата рождения. {pricing.CurfewText}." : $"{pricing.CurfewText}. Неиспользованное время возвращено на баланс.",
+                        NotificationLevel.Warning, TtlSec: 120)));
+                    effects.Commands.Add((s.ClubId, s.PcId, NewCommand.EndSession(new EndSessionCommand(s.Id, SessionEndReason.Admin))));
+                    await SessionService.SignOutAsync(c, tx, s.UserId, s.PcId, effects);
+                    await c.ExecuteAsync(
+                        """
+                        INSERT INTO session_events (session_id, club_id, source, type, at, received_at, data, applied)
+                        VALUES (@Id, @ClubId, 'server', 'curfewEnd', @end, @now, jsonb_build_object('noBirthDate', @unknown), true)
+                        """,
+                        new { s.Id, s.ClubId, end, now, unknown }, tx);
+                    logger.LogInformation("Session {SessionId} ended by the minors' curfew", s.Id);
+                    continue;
+                }
+
+                var left = next - now;
+                var due = CurfewWarningMinutes.Where(m => left <= TimeSpan.FromMinutes(m) && !s.CurfewWarned.Contains(m)).ToArray();
+                if (due.Length == 0)
+                {
+                    continue;
+                }
+
+                var minutes = Math.Max(1, (int)Math.Ceiling(left.TotalMinutes));
+                foreach (var m in due)
+                {
+                    await c.ExecuteAsync(
+                        """
+                        INSERT INTO session_events (session_id, club_id, source, type, at, received_at, data, applied)
+                        VALUES (@Id, @ClubId, 'server', 'curfewWarning', @now, @now, jsonb_build_object('minutes', @m), true)
+                        """,
+                        new { s.Id, s.ClubId, now, m }, tx);
+                }
+
+                effects.Notifications.Add((s.PcId, new Notification(
+                    Guid.NewGuid(), $"Через {minutes} мин сеанс завершится",
+                    unknown
+                        ? $"В аккаунте не указана дата рождения: в {pricing.MinorCurfew} сеанс завершится. Укажите её у администратора."
+                        : $"{pricing.CurfewText}: в {pricing.MinorCurfew} сеанс завершится, неиспользованное время вернётся на баланс.",
+                    NotificationLevel.Warning, TtlSec: 60)));
+            }
         }
     }
 
@@ -275,6 +380,17 @@ public sealed class SessionTickWorker(
             await tx.RollbackAsync("auto_extend");
             return false;
         }
+    }
+
+    /// <summary>An open session as the curfew pass sees it (D-108).</summary>
+    private sealed class CurfewRow : SessionRow
+    {
+        public string Role { get; init; } = "member";
+        public string? BirthDate { get; init; }
+        public bool Settled { get; init; }
+
+        /// <summary>The warnings already given in the last hour (minutes before the start).</summary>
+        public int[] CurfewWarned { get; init; } = [];
     }
 
     private sealed class TickRow : SessionRow
